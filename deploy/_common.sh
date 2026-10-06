@@ -64,6 +64,21 @@ env_value() {
 # keystroke — 'y' is too easy to hit by accident on a production box.
 confirm_destructive() {
   local what="$1"
+
+  # Throw away anything already sitting in the input buffer before asking.
+  #
+  # People paste several commands at once. Without this, the line AFTER the one
+  # that triggered the prompt gets eaten as the answer — so a block like
+  #
+  #     bash deploy/db.sh reset
+  #     yes
+  #
+  # confirms a destructive operation that nobody consciously agreed to. The
+  # answer has to be typed in response to the question, not before it was asked.
+  while read -r -t 0 2>/dev/null; do
+    read -r _ 2>/dev/null || break
+  done
+
   printf '\n\033[31mThis will %s.\033[0m\n' "$what"
   printf "Type 'yes' to continue: "
   local reply
