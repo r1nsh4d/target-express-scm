@@ -5,13 +5,31 @@
  * of numbered steps does not answer that, because the real shape is not a list —
  * it is a one-time setup that feeds a loop you run every day.
  *
- * Drawn as inline SVG rather than a picture so it reads in both themes, scales
- * to any width, and can be read by a screen reader. Everything is laid out on a
- * fixed viewBox and scaled by the container, which is what keeps the arrows
- * meeting the boxes at every size.
+ * Built from CSS boxes, not SVG.
+ *
+ * The first version was SVG on a hand-computed grid, and it broke in exactly
+ * the ways that approach breaks: the viewBox was 1000 units wide while the six
+ * boxes needed 1010, so the last one was cut off; the captions were drawn as
+ * single-line <text>, so anything longer than its box ran out over the
+ * neighbours; and the connector paths were routed by arithmetic that no longer
+ * matched once the boxes moved.
+ *
+ * None of that is fixable by nudging numbers — it comes from laying out text by
+ * hand. Flexbox already wraps text inside a box, already wraps the boxes onto
+ * the next line, and already tells you the true width of the row. So the arrows
+ * became chevrons between items rather than lines that have to find them.
  */
 
-const SETUP = [
+import { ArrowDown, ChevronRight, RotateCcw } from 'lucide-react'
+
+interface Node {
+  label: string
+  detail: string
+  /** The step this whole chart exists to locate. */
+  accent?: boolean
+}
+
+const SETUP: Node[] = [
   { label: 'Goods category', detail: 'Spare parts / furniture' },
   { label: 'Vendor', detail: 'Then its divisions' },
   { label: 'Warehouse', detail: 'Where runs start and end' },
@@ -20,9 +38,9 @@ const SETUP = [
   { label: 'Customers', detail: 'The delivery points' },
 ]
 
-const DAILY = [
-  { label: 'Freight', detail: 'Pick division, warehouse, date, points' },
-  { label: 'Consignment', detail: 'One vendor bill, attached to one point' },
+const RUN: Node[] = [
+  { label: 'Freight', detail: 'Division, warehouse, date, points' },
+  { label: 'Consignment', detail: 'One vendor bill, on one point', accent: true },
   { label: 'Boxes', detail: 'Created under the bill' },
   { label: 'Labels', detail: 'One QR sticker per box' },
   { label: 'Dispatch', detail: 'LR issued, opening odometer' },
@@ -31,209 +49,73 @@ const DAILY = [
   { label: 'Invoice + settle', detail: 'Vendor billed, driver paid' },
 ]
 
-export function WorkflowChart() {
-  const W = 1000
-  const boxW = 142
-  const boxH = 54
-  const gap = 28
-
-  const setupY = 54
-  const dailyY1 = 206
-  const dailyY2 = 316
-
-  const setupX = (i: number) => 18 + i * (boxW + gap)
-  const dailyX = (i: number) => 18 + i * (boxW + gap)
-
+function Box({ node }: { node: Node }) {
   return (
-    <figure className="m-0">
-      <svg
-        viewBox={`0 0 ${W} 400`}
-        className="w-full"
-        role="img"
-        aria-label={
-          'The Target Express cycle. Set up once per vendor: goods category, vendor and its ' +
-          'divisions, warehouse, rate card, vehicle and driver, customers. Then every day: ' +
-          'create a freight, attach consignments to its points, boxes are created under each ' +
-          'bill, print one QR label per box, dispatch which issues the LR number, deliver by ' +
-          'scanning each box at its point, return to the warehouse to complete the freight, ' +
-          'then invoice the vendor and settle the driver.'
-        }
+    <div
+      className="flex min-h-[64px] w-[164px] shrink-0 flex-col justify-center rounded-[10px] px-3 py-2.5"
+      style={{
+        background: node.accent ? 'var(--accent-dim)' : 'var(--surface)',
+        border: `1px solid ${node.accent ? 'var(--accent)' : 'var(--border-strong)'}`,
+      }}
+    >
+      <p
+        className="text-[13px] leading-tight font-semibold"
+        style={{ color: node.accent ? 'var(--accent)' : 'var(--text)' }}
       >
-        <defs>
-          <marker
-            id="wf-arrow"
-            viewBox="0 0 10 10"
-            refX="9"
-            refY="5"
-            markerWidth="6"
-            markerHeight="6"
-            orient="auto-start-reverse"
-          >
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)" />
-          </marker>
-        </defs>
+        {node.label}
+      </p>
+      {/* Wraps. That is the entire reason this is not SVG. */}
+      <p className="mt-1 text-[11px] leading-[1.3]" style={{ color: 'var(--text-faint)' }}>
+        {node.detail}
+      </p>
+    </div>
+  )
+}
 
-        {/* ---------------- set up once ---------------- */}
-        <text x="18" y="26" className="fill-[var(--text-faint)]" fontSize="12" letterSpacing="1.6">
-          SET UP ONCE PER VENDOR
-        </text>
+function Row({ nodes }: { nodes: Node[] }) {
+  return (
+    <div className="flex flex-wrap items-stretch gap-x-1 gap-y-2.5">
+      {nodes.map((node, i) => (
+        <div key={node.label} className="flex items-stretch">
+          <Box node={node} />
+          {i < nodes.length - 1 ? (
+            <div className="flex w-5 items-center justify-center" aria-hidden>
+              <ChevronRight className="size-4" style={{ color: 'var(--text-faint)' }} />
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  )
+}
 
-        {SETUP.map((node, i) => (
-          <g key={node.label}>
-            <rect
-              x={setupX(i)}
-              y={setupY}
-              width={boxW}
-              height={boxH}
-              rx="9"
-              fill="var(--surface)"
-              stroke="var(--border-strong)"
-            />
-            <text
-              x={setupX(i) + boxW / 2}
-              y={setupY + 22}
-              textAnchor="middle"
-              fontSize="13"
-              fontWeight="600"
-              className="fill-[var(--text)]"
-            >
-              {node.label}
-            </text>
-            <text
-              x={setupX(i) + boxW / 2}
-              y={setupY + 39}
-              textAnchor="middle"
-              fontSize="10.5"
-              className="fill-[var(--text-faint)]"
-            >
-              {node.detail}
-            </text>
-            {i < SETUP.length - 1 ? (
-              <line
-                x1={setupX(i) + boxW}
-                y1={setupY + boxH / 2}
-                x2={setupX(i + 1) - 6}
-                y2={setupY + boxH / 2}
-                stroke="var(--text-faint)"
-                strokeWidth="1.5"
-                markerEnd="url(#wf-arrow)"
-              />
-            ) : null}
-          </g>
-        ))}
+export function WorkflowChart() {
+  return (
+    <div className="space-y-4">
+      <section>
+        <p className="eyebrow mb-2.5">Set up once per vendor</p>
+        <Row nodes={SETUP} />
+      </section>
 
-        {/* Setup feeds the daily loop. */}
-        <path
-          d={`M ${setupX(0) + boxW / 2} ${setupY + boxH} L ${setupX(0) + boxW / 2} ${dailyY1 - 8}`}
-          stroke="var(--text-faint)"
-          strokeWidth="1.5"
-          strokeDasharray="4 4"
-          fill="none"
-          markerEnd="url(#wf-arrow)"
-        />
+      <div className="flex items-center gap-2 pl-1" aria-hidden>
+        <ArrowDown className="size-4" style={{ color: 'var(--text-faint)' }} />
+        <span className="h-px flex-1" style={{ background: 'var(--border)' }} />
+      </div>
 
-        {/* ---------------- every run ---------------- */}
-        <text
-          x="18"
-          y={dailyY1 - 26}
-          className="fill-[var(--accent)]"
-          fontSize="12"
-          letterSpacing="1.6"
-        >
-          EVERY RUN
-        </text>
+      <section>
+        <p className="eyebrow mb-2.5" style={{ color: 'var(--accent)' }}>
+          Every run
+        </p>
+        <Row nodes={RUN} />
+      </section>
 
-        {DAILY.map((node, i) => {
-          const row = i < 4 ? 0 : 1
-          const col = i < 4 ? i : i - 4
-          const x = dailyX(col)
-          const y = row === 0 ? dailyY1 : dailyY2
-          // The consignment step is what the whole chart is here to locate.
-          const highlight = node.label === 'Consignment'
-
-          return (
-            <g key={node.label}>
-              <rect
-                x={x}
-                y={y}
-                width={boxW}
-                height={boxH}
-                rx="9"
-                fill={highlight ? 'var(--accent-dim)' : 'var(--surface)'}
-                stroke={highlight ? 'var(--accent)' : 'var(--border-strong)'}
-                strokeWidth={highlight ? 1.5 : 1}
-              />
-              <text
-                x={x + boxW / 2}
-                y={y + 22}
-                textAnchor="middle"
-                fontSize="13"
-                fontWeight="600"
-                fill={highlight ? 'var(--accent)' : 'var(--text)'}
-              >
-                {node.label}
-              </text>
-              <text
-                x={x + boxW / 2}
-                y={y + 39}
-                textAnchor="middle"
-                fontSize="10.5"
-                className="fill-[var(--text-faint)]"
-              >
-                {node.detail}
-              </text>
-
-              {/* within a row */}
-              {col < 3 && i !== DAILY.length - 1 ? (
-                <line
-                  x1={x + boxW}
-                  y1={y + boxH / 2}
-                  x2={dailyX(col + 1) - 6}
-                  y2={y + boxH / 2}
-                  stroke="var(--text-faint)"
-                  strokeWidth="1.5"
-                  markerEnd="url(#wf-arrow)"
-                />
-              ) : null}
-            </g>
-          )
-        })}
-
-        {/* wrap from the end of row one down to the start of row two */}
-        <path
-          d={`M ${dailyX(3) + boxW / 2} ${dailyY1 + boxH}
-              L ${dailyX(3) + boxW / 2} ${dailyY1 + boxH + 26}
-              L ${dailyX(0) + boxW / 2} ${dailyY1 + boxH + 26}
-              L ${dailyX(0) + boxW / 2} ${dailyY2 - 8}`}
-          stroke="var(--text-faint)"
-          strokeWidth="1.5"
-          fill="none"
-          markerEnd="url(#wf-arrow)"
-        />
-
-        {/* and back round for the next run */}
-        <path
-          d={`M ${dailyX(3) + boxW / 2} ${dailyY2 + boxH}
-              L ${dailyX(3) + boxW / 2} ${dailyY2 + boxH + 24}
-              L ${dailyX(0) + boxW / 2 - 40} ${dailyY2 + boxH + 24}
-              L ${dailyX(0) + boxW / 2 - 40} ${dailyY1 + boxH / 2}
-              L ${dailyX(0) - 6} ${dailyY1 + boxH / 2}`}
-          stroke="var(--accent)"
-          strokeWidth="1.5"
-          strokeDasharray="5 5"
-          fill="none"
-          opacity="0.6"
-          markerEnd="url(#wf-arrow)"
-        />
-        <text
-          x={dailyX(1)}
-          y={dailyY2 + boxH + 40}
-          fontSize="10.5"
-          className="fill-[var(--text-faint)]"
-        >
-          the next run starts again here — the setup above is not repeated
-        </text>
-      </svg>
-    </figure>
+      <p
+        className="flex items-center gap-2 text-[11.5px]"
+        style={{ color: 'var(--text-faint)' }}
+      >
+        <RotateCcw className="size-3.5 shrink-0" aria-hidden />
+        The next run starts again at Freight. The setup above is not repeated.
+      </p>
+    </div>
   )
 }

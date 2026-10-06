@@ -221,10 +221,10 @@ export default function GuidePage() {
           Everything on the top row is done once per vendor and then left alone. Everything on
           the bottom two rows happens on every run.
         </p>
-        <div className="mt-4 overflow-x-auto">
-          <div className="min-w-[720px]">
-            <WorkflowChart />
-          </div>
+        {/* No forced width and no horizontal scroll: the chart wraps onto as
+            many lines as the column gives it. */}
+        <div className="mt-4">
+          <WorkflowChart />
         </div>
       </Card>
 
