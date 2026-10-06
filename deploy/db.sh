@@ -414,11 +414,52 @@ print(f'  file: {files[0]}')
     confirm_destructive "REPLACE every row in '$DB_NAME' with the contents of $FILE"
 
     bold "Restoring from $FILE"
-    dc exec -T db psql -U "$DB_USER" -d postgres -c \
-      "DROP DATABASE IF EXISTS $DB_NAME WITH (FORCE); CREATE DATABASE $DB_NAME;"
-    gunzip -c "$FILE" | dc exec -T db psql -U "$DB_USER" -d "$DB_NAME" >/dev/null
+
+    # The API holds a pool of open connections. WITH (FORCE) would terminate
+    # them, but a backend reconnecting mid-drop makes the whole thing flaky, so
+    # it is stopped first and started again at the end.
+    API_WAS_UP=false
+    if service_running api; then
+      API_WAS_UP=true
+      dc stop api >/dev/null 2>&1 || true
+    fi
+
+    # Two separate psql calls, not one with two statements in it.
+    #
+    # psql wraps the statements inside a single -c in one transaction, and
+    # DROP DATABASE cannot run in a transaction — it fails with "cannot run
+    # inside a transaction block" and the restore carries on into a database
+    # that was never recreated.
+    if ! dc exec -T db psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+         -c "DROP DATABASE IF EXISTS $DB_NAME WITH (FORCE);"; then
+      [ "$API_WAS_UP" = true ] && dc start api >/dev/null 2>&1 || true
+      die "could not drop '$DB_NAME' — nothing was changed"
+    fi
+
+    if ! dc exec -T db psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+         -c "CREATE DATABASE $DB_NAME;"; then
+      [ "$API_WAS_UP" = true ] && dc start api >/dev/null 2>&1 || true
+      die "dropped '$DB_NAME' but could not recreate it — restore the dump by hand before anything else"
+    fi
+
+    # ON_ERROR_STOP again: without it psql reports every failed statement and
+    # still exits 0, so a restore that half worked would be announced as a
+    # success and nobody would look at the database until it mattered.
+    if ! gunzip -c "$FILE" | dc exec -T db psql -U "$DB_USER" -d "$DB_NAME" \
+         -v ON_ERROR_STOP=1 >/dev/null; then
+      [ "$API_WAS_UP" = true ] && dc start api >/dev/null 2>&1 || true
+      die "the dump did not load cleanly — '$DB_NAME' is now partial, reload it before using the application"
+    fi
+
     ok "restored"
-    warn "Restart the API so it picks up fresh connections: bash deploy/backend.sh restart"
+
+    if [ "$API_WAS_UP" = true ]; then
+      dc start api >/dev/null 2>&1
+      ok "API started again"
+    fi
+
+    warn "The dump carries its own alembic_version. If it predates the current"
+    warn "code, run: bash deploy/db.sh sync"
     ;;
 
   psql)
