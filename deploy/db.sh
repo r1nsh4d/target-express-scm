@@ -7,6 +7,7 @@
 #   bash deploy/db.sh migrate          apply any pending migrations
 #   bash deploy/db.sh sync             bring the database in step with the code
 #   bash deploy/db.sh drop-unapplied   remove migrations outside the applied history
+#   bash deploy/db.sh make-baseline    one migration that builds the schema from empty
 #   bash deploy/db.sh rebuild-history  restart the history from the live schema
 #   bash deploy/db.sh makemigration    generate one from the models, then apply
 #   bash deploy/db.sh check            report schema drift without changing anything
@@ -233,6 +234,115 @@ else:
       ok "the database matches the models"
     else
       die "still out of step — run 'bash deploy/db.sh check' and read the output"
+    fi
+    ;;
+
+  make-baseline)
+    # Produce a migration that can build the schema from NOTHING.
+    #
+    # This exists because `rebuild-history` produced something that looked like
+    # a baseline and was not. It autogenerates against the LIVE database, so
+    # everything already there is absent from the diff: the file it wrote
+    # created four tables out of thirty-five. Run against an empty database it
+    # would have produced a schema missing almost everything, and nobody would
+    # have found out until they actually needed it.
+    #
+    # The fix is to diff the models against a genuinely empty database. So this
+    # makes one, on the same Postgres, autogenerates against THAT, and throws it
+    # away. The live database is then stamped with the new revision, because its
+    # tables already exist and must not be recreated.
+    #
+    # Nothing touches the real schema. The only write to it is one row in
+    # alembic_version.
+    bold "Building a complete baseline migration"
+    service_running api || die "the api container is not running"
+    service_running db || die "Postgres is not running"
+
+    confirm_destructive "REPLACE the migration history with a single complete baseline (the schema and all data are left alone)"
+
+    bold "Backing up first"
+    "$0" backup
+
+    TMPDB="tx_baseline_tmp"
+    STASH="/srv/alembic/_versions_stash"
+
+    bold "1. Making an empty database to diff against"
+    dc exec -T db psql -U "$DB_USER" -d postgres -qtAX \
+      -c "DROP DATABASE IF EXISTS ${TMPDB};" >/dev/null
+    dc exec -T db psql -U "$DB_USER" -d postgres -qtAX \
+      -c "CREATE DATABASE ${TMPDB};" >/dev/null || die "could not create ${TMPDB}"
+    ok "created ${TMPDB}"
+
+    bold "2. Setting the existing migrations aside"
+    dc exec -T api sh -c "mkdir -p ${STASH} && mv /srv/alembic/versions/*.py ${STASH}/ 2>/dev/null; true"
+    ok "stashed"
+
+    bold "3. Writing the baseline against the empty database"
+    # DATABASE_URL is rebuilt here so alembic diffs the models against TMPDB.
+    # env.py reads it, so nothing else needs to change.
+    if ! dc exec -T api sh -c "
+         DATABASE_URL=\$(python -c \"
+import os, re
+url = os.environ['DATABASE_URL']
+print(re.sub(r'/[^/?]+(\\\\?|\$)', '/${TMPDB}\\\\1', url, count=1))
+\") alembic revision --autogenerate -m 'complete baseline'"; then
+      warn "generation failed — putting the old migrations back"
+      dc exec -T api sh -c "mv ${STASH}/*.py /srv/alembic/versions/ 2>/dev/null; true"
+      dc exec -T db psql -U "$DB_USER" -d postgres -qtAX -c "DROP DATABASE IF EXISTS ${TMPDB};" >/dev/null
+      die "could not generate the baseline"
+    fi
+
+    bold "4. Checking it actually covers everything"
+    dc exec -T api python -c "
+import os, re
+from app.models import Base
+
+folder = '/srv/alembic/versions'
+files = [f for f in os.listdir(folder) if f.endswith('.py')]
+if len(files) != 1:
+    raise SystemExit(f'  expected one baseline, found {len(files)}')
+
+text = open(os.path.join(folder, files[0])).read()
+created = set(re.findall(r\"op\.create_table\('([^']+)'\", text))
+wanted = set(Base.metadata.tables) - {'alembic_version'}
+
+missing = wanted - created
+if missing:
+    raise SystemExit(f'  INCOMPLETE - {len(missing)} table(s) missing: {sorted(missing)}')
+
+print(f'  creates all {len(created)} tables')
+print(f'  file: {files[0]}')
+" || {
+      warn "the generated baseline is incomplete — putting the old migrations back"
+      dc exec -T api sh -c "rm -f /srv/alembic/versions/*.py; mv ${STASH}/*.py /srv/alembic/versions/ 2>/dev/null; true"
+      dc exec -T db psql -U "$DB_USER" -d postgres -qtAX -c "DROP DATABASE IF EXISTS ${TMPDB};" >/dev/null
+      die "baseline rejected — nothing was changed"
+    }
+
+    bold "5. Dropping the scratch database"
+    dc exec -T db psql -U "$DB_USER" -d postgres -qtAX \
+      -c "DROP DATABASE IF EXISTS ${TMPDB};" >/dev/null && ok "dropped"
+    dc exec -T api sh -c "rm -rf ${STASH}"
+
+    bold "6. Stamping the live database"
+    # Stamp, not upgrade. The tables are already there; running the baseline
+    # against them would fail on the first CREATE TABLE.
+    psql_q "DROP TABLE IF EXISTS alembic_version;" >/dev/null
+    dc exec -T api alembic stamp head || die "could not stamp the live database"
+    ok "stamped at $(psql_q "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null || echo '?')"
+
+    bold "7. Copying it out"
+    rm -rf backend/alembic/versions
+    mkdir -p backend/alembic/versions
+    docker cp "tx-api:/srv/alembic/versions/." backend/alembic/versions/ 2>/dev/null \
+      && ok "backend/alembic/versions/ holds the complete baseline — COMMIT IT" \
+      || warn "could not copy it out; do it by hand"
+
+    bold "Verifying"
+    if dc exec -T api alembic check >/dev/null 2>&1; then
+      ok "the database matches the models, and the baseline can rebuild it from empty"
+    else
+      die "still out of step — run 'bash deploy/db.sh check'"
     fi
     ;;
 
