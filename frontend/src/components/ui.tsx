@@ -330,7 +330,12 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         className={clsx(
-          'tx-in-scale relative z-10 w-full',
+          'tx-in-scale relative z-10 flex w-full flex-col',
+          // Never taller than the window, and scroll inside rather than off the
+          // bottom of it. A form with six fields on a 600px laptop ran past the
+          // fold with its Save button somewhere below the screen — the dialog
+          // looked cut in half and there was nothing obvious to do about it.
+          'max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-4rem)]',
           wide ? 'max-w-3xl' : 'max-w-lg',
         )}
         /* Solid, NOT the glass `.surface`.
@@ -345,7 +350,12 @@ export function Modal({
           boxShadow: 'var(--lift-lg)',
         }}
       >
-        <div className="flex items-start justify-between gap-4 px-5 pt-5 pb-3">
+        {/* Sticky, so you can still see what you are filling in — and still
+            reach the close button — once the body has scrolled. */}
+        <div
+          className="sticky top-0 z-10 flex shrink-0 items-start justify-between gap-4 px-5 pt-5 pb-3"
+          style={{ background: 'var(--surface-solid)' }}
+        >
           <div>
             <h2 className="text-base font-semibold tracking-tight">{title}</h2>
             {description ? (
@@ -363,7 +373,7 @@ export function Modal({
             <X className="size-4" />
           </button>
         </div>
-        <div className="px-5 pb-5">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">{children}</div>
       </div>
     </div>
   )

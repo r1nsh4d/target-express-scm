@@ -109,13 +109,31 @@ export function WorkflowChart() {
         <Row nodes={RUN} />
       </section>
 
-      <p
-        className="flex items-center gap-2 text-[11.5px]"
-        style={{ color: 'var(--text-faint)' }}
-      >
-        <RotateCcw className="size-3.5 shrink-0" aria-hidden />
-        The next run starts again at Freight. The setup above is not repeated.
-      </p>
+      <div className="space-y-1.5">
+        <p
+          className="flex items-center gap-2 text-[11.5px]"
+          style={{ color: 'var(--text-faint)' }}
+        >
+          <RotateCcw className="size-3.5 shrink-0" aria-hidden />
+          The next run starts again at Freight. The setup above is not repeated.
+        </p>
+
+        {/* Say what the colour means.
+            Consignment was picked out because it is the step people ask about,
+            and the explanation sits directly below this chart. Without this
+            line the colour just looks arbitrary, which is worse than no colour
+            at all — the reader stops to work out what it signifies instead of
+            reading the diagram. */}
+        <p className="flex items-center gap-2 text-[11.5px]" style={{ color: 'var(--text-faint)' }}>
+          <span
+            className="inline-block size-2.5 shrink-0 rounded-[3px]"
+            style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent)' }}
+            aria-hidden
+          />
+          Consignment is marked because it is the step that catches people out — when it is
+          created, and what has to exist first. That is explained just below.
+        </p>
+      </div>
     </div>
   )
 }
