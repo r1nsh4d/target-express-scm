@@ -1,0 +1,53 @@
+# Line endings.
+#
+# This repository is edited on Windows and runs on Linux. Git's default on
+# Windows (core.autocrlf=true) rewrites LF to CRLF on checkout, which is fine
+# for a Windows editor and fatal for everything else here:
+#
+#   * bash reads `#!/usr/bin/env bash\r` and reports "$'\r': command not found"
+#   * docker compose reads TX_HTTP_PORT=18080\r and binds a port named "18080\r"
+#   * a CRLF Dockerfile entrypoint fails inside the image with no useful error
+#
+# So the working tree is pinned to LF for every text file, whatever the
+# developer's core.autocrlf is set to. Windows editors have handled LF for
+# twenty years; Linux has never handled CR.
+
+* text=auto eol=lf
+
+# Belt and braces for the files that actually break. Listed explicitly so the
+# intent survives someone relaxing the blanket rule above.
+*.sh      text eol=lf
+*.bash    text eol=lf
+*.py      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.toml    text eol=lf
+*.ini     text eol=lf
+*.json    text eol=lf
+*.env     text eol=lf
+.env.*    text eol=lf
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
+.dockerignore   text eol=lf
+*.conf    text eol=lf
+*.example text eol=lf
+*.mako    text eol=lf
+*.sql     text eol=lf
+
+# A .bat or .ps1 genuinely wants CRLF — it is only ever run by Windows.
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary: never touched, never diffed as text.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.pdf  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.tar.gz binary

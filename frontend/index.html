@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <title>Target Express</title>
+    <meta name="description" content="Delivery management for Target Express Logistics" />
+
+    <!-- Brand assets live in public/brand/ - see the README there.
+         Missing files fall back silently to the browser default. -->
+    <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg" />
+    <link rel="alternate icon" href="/brand/favicon.ico" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <meta name="theme-color" content="#15181e" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#eaedf3" media="(prefers-color-scheme: light)" />
+
+    <!-- Drivers add this to the home screen; keep it feeling like an app. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Target Express" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Inter for the workspace; Anton for the display type on the public site. -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Anton&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- The landing page's hero photograph. Without this it is not discovered
+         until the React bundle has parsed and rendered, which on a phone is a
+         second of empty frame where the first impression should be. The app
+         routes do not use it, so it is fetched at low priority and the <img>
+         tag's own fetchpriority="high" promotes it on the one page that does. -->
+    <link rel="preload" as="image" href="/hero.jpg" fetchpriority="low" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

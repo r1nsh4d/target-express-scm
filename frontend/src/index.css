@@ -1,0 +1,613 @@
+@import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+   Target Express design system — "Signal"
+
+   The brand is black and white, and it stays black and white: the rail, the
+   logo and the typography carry it. What was missing was LIGHT. A product with
+   no light in it has no depth, and a product with no depth reads as a form, not
+   as an instrument.
+
+   So one system colour is added on top of the brand — a cyan that shades to
+   violet. It is never decoration. It means LIVE: a vehicle on the road, a
+   number still moving, the field you are typing in, the point being delivered
+   right now. If it glows, it is happening. If it is grey, it is settled. An
+   operator can read the screen from across the godown on that rule alone.
+
+   Dark is the default. Logistics control rooms are dark, the drivers' phones
+   are used at 5am, and the accent only reads as light against something dark.
+   Light mode is complete and supported — it is a preference, not an afterthought.
+
+   Depth comes from three layers, in this order:
+     1. the canvas, which is almost black and very slightly blue
+     2. glass — translucent surfaces with a luminous 1px edge
+     3. glow — a soft radial bloom behind whatever is live
+
+   TEXT KEEPS FULL CONTRAST at every layer. Depth is carried by light, never by
+   fading the words. A screen full of kilometres and rupees has to be readable.
+--------------------------------------------------------------------------- */
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Anton', 'Inter', sans-serif;
+  --radius-card: 14px;
+  --radius-control: 10px;
+}
+
+/* ---------------------------------------------------------------------------
+   Dark — the default
+--------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: dark;
+
+  /* Canvas. Near-black, pulled very slightly toward blue so white type on it
+     reads cool rather than muddy. */
+  --bg: #06080d;
+  --bg-elevated: #0b0e15;
+
+  /* Glass. Surfaces are built from light on the canvas, not from a flat fill,
+     so a card stacked on a card still separates. */
+  --surface: rgba(255, 255, 255, 0.028);
+  --surface-solid: #0d111a;
+  --surface-hover: rgba(255, 255, 255, 0.055);
+  --surface-glass: rgba(255, 255, 255, 0.04);
+
+  --border: rgba(255, 255, 255, 0.075);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  --text: #eef1f7;
+  --text-muted: #969db0;
+  --text-faint: #646c80;
+
+  /* The system colour. Cyan is the resting state, violet the far end of any
+     gradient. Used for live state, focus, progress and data — nothing else. */
+  --accent: #22d3ee;
+  --accent-2: #a78bfa;
+  --accent-hover: #67e8f9;
+  --accent-dim: rgba(34, 211, 238, 0.14);
+  --accent-fg: #04070c;
+  --accent-grad: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #fb7185;
+  --info: #60a5fa;
+
+  /* Elevation. Dark UI gets depth from a cast shadow plus a lit top edge —
+     the inset highlight is what makes glass look like glass. */
+  --lift-sm:
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  --lift:
+    0 4px 24px -4px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --lift-lg:
+    0 24px 60px -12px rgba(0, 0, 0, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+
+  --well: inset 0 1px 2px rgba(0, 0, 0, 0.55);
+  --glow: 0 0 0 1px var(--accent-dim), 0 0 28px -6px rgba(34, 211, 238, 0.45);
+
+  --ring: var(--accent);
+
+  /* The navigation rail is black in both themes — it is the brand's anchor. */
+  --rail: #04060a;
+  --rail-text: #f4f6fa;
+  --rail-muted: #8089a0;
+  --rail-faint: #525a6d;
+  --rail-hover: rgba(255, 255, 255, 0.055);
+  --rail-active: rgba(34, 211, 238, 0.1);
+  --rail-border: rgba(255, 255, 255, 0.07);
+
+  /* Legacy soft-UI names, kept so no screen has to be touched to compile.
+     They now resolve to the new elevation scale. */
+  --neu-raised: var(--lift);
+  --neu-raised-sm: var(--lift-sm);
+  --neu-inset: var(--well);
+  --neu-pressed: var(--well);
+  --shadow-dark: rgba(0, 0, 0, 0.6);
+  --shadow-light: rgba(255, 255, 255, 0.04);
+}
+
+/* ---------------------------------------------------------------------------
+   Light — same structure, inverted light source
+--------------------------------------------------------------------------- */
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f6f7fb;
+  --bg-elevated: #ffffff;
+
+  --surface: #ffffff;
+  --surface-solid: #ffffff;
+  --surface-hover: #f1f3f9;
+  --surface-glass: rgba(255, 255, 255, 0.72);
+
+  --border: #e6e9f1;
+  --border-strong: #d3d8e5;
+
+  --text: #0b0e15;
+  --text-muted: #5a6276;
+  --text-faint: #8b93a6;
+
+  /* Cyan has to come down two steps to stay legible on white. */
+  --accent: #0e9bb5;
+  --accent-2: #7c5cf0;
+  --accent-hover: #0b8299;
+  --accent-dim: rgba(14, 155, 181, 0.1);
+  --accent-fg: #ffffff;
+
+  --success: #047857;
+  --warning: #b45309;
+  --danger: #be123c;
+  --info: #1d4ed8;
+
+  --lift-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --lift:
+    0 1px 3px rgba(16, 24, 40, 0.07),
+    0 8px 24px -8px rgba(16, 24, 40, 0.1);
+  --lift-lg:
+    0 2px 6px rgba(16, 24, 40, 0.07),
+    0 24px 56px -16px rgba(16, 24, 40, 0.18);
+
+  --well: inset 0 1px 2px rgba(16, 24, 40, 0.07);
+  --glow: 0 0 0 1px var(--accent-dim), 0 0 24px -8px rgba(14, 155, 181, 0.4);
+
+  --shadow-dark: rgba(16, 24, 40, 0.1);
+  --shadow-light: rgba(255, 255, 255, 0.9);
+}
+
+/* ---------------------------------------------------------------------------
+   Base
+--------------------------------------------------------------------------- */
+
+@layer base {
+  html,
+  body {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
+    font-size: 14px;
+    line-height: 1.5;
+    letter-spacing: -0.006em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    min-height: 100dvh;
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.022em;
+  }
+
+  /* Numbers compared down a column must line up: kilometres, rupees, odometer
+     readings. */
+  .tnum,
+  table td,
+  table th {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--accent) 30%, transparent);
+    color: var(--text);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-faint);
+    background-clip: content-box;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Motion
+   Every keyframe below is switched off wholesale under prefers-reduced-motion
+   at the end of this file. Motion here is for explaining a change — something
+   arriving, something live, something loading — never for ornament.
+--------------------------------------------------------------------------- */
+
+@keyframes tx-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes tx-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes tx-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A live indicator: the dot stays put, a ring leaves it. */
+@keyframes tx-ping {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+  70%,
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@keyframes tx-shimmer {
+  from {
+    background-position: -150% 0;
+  }
+  to {
+    background-position: 250% 0;
+  }
+}
+
+/* The slow drift of the hero and login backdrops. 24s, so it is felt rather
+   than watched. */
+@keyframes tx-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(3%, -4%, 0) scale(1.08);
+  }
+  66% {
+    transform: translate3d(-3%, 3%, 0) scale(0.96);
+  }
+}
+
+@keyframes tx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A dash travelling along a route line. */
+@keyframes tx-dash {
+  to {
+    stroke-dashoffset: -1000;
+  }
+}
+
+@layer utilities {
+  /* --- entrance ---------------------------------------------------------- */
+
+  /* Stagger by setting --d on the element: style={{ '--d': '60ms' }} */
+  .tx-in {
+    animation: tx-rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: var(--d, 0ms);
+  }
+
+  .tx-in-fade {
+    animation: tx-fade 0.5s ease both;
+    animation-delay: var(--d, 0ms);
+  }
+
+  .tx-in-scale {
+    animation: tx-scale-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: var(--d, 0ms);
+  }
+
+  /* Scroll reveal. The element starts hidden and .is-in is added by the
+     observer in lib/reveal.ts. */
+  .tx-reveal {
+    opacity: 0;
+    transform: translateY(22px);
+    transition:
+      opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+    transition-delay: var(--d, 0ms);
+  }
+  .tx-reveal.is-in {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* --- surfaces ---------------------------------------------------------- */
+
+  /* The workhorse panel: glass in dark, white card in light. */
+  .surface {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--lift);
+  }
+
+  .surface-sm {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    box-shadow: var(--lift-sm);
+  }
+
+  /* Pressed into the canvas: inputs, wells, search fields. */
+  .inset {
+    background-color: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    box-shadow: var(--well);
+  }
+
+  .pressed {
+    box-shadow: var(--well);
+  }
+
+  /* A panel that is live. The bloom sits behind it and does not affect layout
+     or hit testing. */
+  .lit {
+    position: relative;
+  }
+  .lit::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: var(--accent-grad);
+    opacity: 0.5;
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* A row or card that responds to the pointer. Lifts 1px — enough to feel,
+     not enough to shift the text under the cursor. */
+  .hoverable {
+    transition:
+      transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.18s ease,
+      border-color 0.18s ease,
+      background-color 0.18s ease;
+  }
+  .hoverable:hover {
+    transform: translateY(-1px);
+    border-color: var(--border-strong);
+    box-shadow: var(--lift-lg);
+  }
+
+  /* --- type -------------------------------------------------------------- */
+
+  .eyebrow {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  /* Headline type set in the accent gradient. Used sparingly — a hero, a
+     single headline number. */
+  .ink-grad {
+    background: var(--accent-grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .hairline {
+    border-top: 1px solid var(--border);
+  }
+
+  .groove {
+    height: 1px;
+    background: linear-gradient(to right, transparent, var(--border-strong), transparent);
+  }
+
+  /* --- live -------------------------------------------------------------- */
+
+  /* A dot with a ring leaving it. Put the label next to it, never alone:
+     colour is the second cue, the word is the first. */
+  .live-dot {
+    position: relative;
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--accent);
+    flex: none;
+  }
+  .live-dot::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--accent);
+    animation: tx-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  /* Loading. A shimmer that says "a row will be here", which a spinner does
+     not — the page does not jump when the data lands. */
+  .skeleton {
+    border-radius: 8px;
+    background: linear-gradient(
+      90deg,
+      var(--surface-hover) 0%,
+      color-mix(in oklab, var(--surface-hover) 40%, var(--border-strong)) 50%,
+      var(--surface-hover) 100%
+    );
+    background-size: 200% 100%;
+    animation: tx-shimmer 1.6s linear infinite;
+  }
+
+  /* --- backdrops --------------------------------------------------------- */
+
+  /* The field behind the hero, the login and the tracking page: two slow
+     coloured blooms over a faint grid. Purely decorative, so aria-hidden and
+     pointer-events:none at every call site. */
+  .aurora {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .aurora::before,
+  .aurora::after {
+    content: '';
+    position: absolute;
+    width: 46vw;
+    height: 46vw;
+    min-width: 420px;
+    min-height: 420px;
+    border-radius: 999px;
+    filter: blur(90px);
+    opacity: 0.4;
+    animation: tx-drift 24s ease-in-out infinite;
+  }
+  .aurora::before {
+    top: -18%;
+    left: -8%;
+    background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+  }
+  .aurora::after {
+    right: -12%;
+    bottom: -24%;
+    background: radial-gradient(circle, var(--accent-2) 0%, transparent 70%);
+    animation-delay: -12s;
+  }
+
+  :root[data-theme='light'] .aurora::before,
+  :root[data-theme='light'] .aurora::after {
+    opacity: 0.16;
+  }
+
+  /* A surveyor's grid, fading out downward. */
+  .grid-field {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, var(--border) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 20%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 20%, transparent 75%);
+  }
+
+  /* --- layout ------------------------------------------------------------ */
+
+  /* The navigation rail and the content column read one width, --tx-rail-w,
+     set by AppShell. Below lg the rail is a drawer, so no offset applies. */
+  .tx-rail {
+    width: var(--tx-rail-w, 236px);
+    transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @media (min-width: 1024px) {
+    .tx-main {
+      padding-left: var(--tx-rail-w, 236px);
+      transition: padding-left 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+  }
+
+  /* --- print ------------------------------------------------------------- */
+
+  /* On paper only the stickers matter: the navigation, the top bar and the
+     sorting sheet come away, the sheet goes to plain white, and a label is
+     never allowed to break across a page. */
+  @media print {
+    aside,
+    header,
+    .print\:hidden {
+      display: none !important;
+    }
+
+    body {
+      background: #fff !important;
+      color: #000 !important;
+    }
+
+    main {
+      max-width: none !important;
+      padding: 0 !important;
+    }
+
+    .label-sheet {
+      display: grid !important;
+      grid-template-columns: repeat(3, 1fr) !important;
+      gap: 4mm !important;
+    }
+
+    .label-card {
+      break-inside: avoid;
+      page-break-inside: avoid;
+      box-shadow: none !important;
+    }
+
+    @page {
+      margin: 8mm;
+    }
+  }
+
+  /* --- reduced motion ---------------------------------------------------- */
+
+  /* One switch for the whole system. Everything still arrives at its final
+     state; it just arrives immediately. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+
+    .tx-reveal {
+      opacity: 1;
+      transform: none;
+    }
+
+    .tx-rail,
+    .tx-main {
+      transition: none;
+    }
+  }
+}

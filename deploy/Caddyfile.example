@@ -1,0 +1,22 @@
+# If the host runs Caddy rather than nginx, append this block to
+# /etc/caddy/Caddyfile. Caddy obtains and renews the certificate itself.
+#
+#   sudo systemctl reload caddy
+#
+# Laam's existing block is untouched - Caddy routes by hostname.
+
+targetexpress.example.com {
+	reverse_proxy 127.0.0.1:18080 {
+		header_up X-Real-IP {remote_host}
+	}
+
+	request_body {
+		max_size 25MB
+	}
+
+	encode gzip
+
+	log {
+		output file /var/log/caddy/target-express.log
+	}
+}

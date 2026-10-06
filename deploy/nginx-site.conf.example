@@ -1,0 +1,36 @@
+# Host nginx vhost for Target Express, alongside whatever already serves Laam.
+#
+#   sudo cp deploy/nginx-site.conf.example /etc/nginx/sites-available/target-express
+#   sudo ln -s /etc/nginx/sites-available/target-express /etc/nginx/sites-enabled/
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo certbot --nginx -d targetexpress.example.com
+#
+# Nothing here touches Laam's vhost: this matches on server_name only, so the
+# two coexist as separate files.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name targetexpress.example.com;
+
+    # certbot writes the ACME challenge here and rewrites this block to 443.
+    location / {
+        proxy_pass http://127.0.0.1:18080;   # TX_HTTP_PORT
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Driver photo uploads.
+        client_max_body_size 25m;
+
+        # Long enough for an invoice run over a month of trips.
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    access_log /var/log/nginx/target-express.access.log;
+    error_log  /var/log/nginx/target-express.error.log;
+}

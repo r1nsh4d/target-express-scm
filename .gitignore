@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# Node
+node_modules/
+dist/
+.vite/
+*.local
+
+# Env - the filled copies never get committed, the templates always do
+.env
+.env.*
+!.env.example
+!.env.prod.example
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Uploads (local dev)
+backend/media/
