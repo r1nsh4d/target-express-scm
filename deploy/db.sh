@@ -207,7 +207,7 @@ else:
     confirm_destructive "DISCARD the migration history and rebuild it from the current database (the schema and all data are left alone)"
 
     bold "Backing up first"
-    "$0" backup
+    bash "$0" backup
 
     bold "1. Removing the broken migration files"
     dc exec -T api sh -c 'rm -f /srv/alembic/versions/*.py' && ok "cleared"
@@ -261,7 +261,7 @@ else:
     confirm_destructive "REPLACE the migration history with a single complete baseline (the schema and all data are left alone)"
 
     bold "Backing up first"
-    "$0" backup
+    bash "$0" backup
 
     TMPDB="tx_baseline_tmp"
     STASH="/srv/alembic/_versions_stash"
@@ -484,13 +484,13 @@ print(f'  file: {files[0]}')
   reset)
     confirm_destructive "DESTROY the database and every freight, invoice and photo record in it"
     bold "Backing up first — a reset without one is just data loss"
-    "$0" backup
+    bash "$0" backup
 
     bold "Rebuilding the database"
     dc stop db >/dev/null
     dc rm -f db >/dev/null
     docker volume rm "${PROJECT}_tx-db-data" >/dev/null 2>&1 || true
-    "$0" up
+    bash "$0" up
     warn "Now run: bash deploy/backend.sh up && bash deploy/db.sh migrate"
     ;;
 
