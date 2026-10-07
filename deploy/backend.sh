@@ -48,6 +48,24 @@ except Exception: sys.exit(1)
   die "the API did not become healthy — logs above"
 }
 
+
+require_module() {
+  # The application is COPIED into the image at build time. A file that exists
+  # in the working tree after a git pull is NOT in the running container until
+  # the image is rebuilt, and the only symptom is "No module named app.x" —
+  # which reads like a broken script rather than a stale image.
+  local module="$1"
+  if ! dc exec -T api python -c "import ${module}" >/dev/null 2>&1; then
+    warn "${module} is not in the running container."
+    warn "The code is copied into the image when it is built, so a file added by"
+    warn "a git pull does not reach the container until it is rebuilt:"
+    warn ""
+    warn "    bash deploy/backend.sh up"
+    warn ""
+    die "rebuild first, then run this again"
+  fi
+}
+
 case "${1:-}" in
 
   up)
@@ -115,16 +133,21 @@ case "${1:-}" in
 
   bootstrap)
     bold "Creating the minimum accounts"
+    require_module app.bootstrap
     dc exec -T api python -m app.bootstrap
     warn "These use the password 'target123' — change them before real use."
     ;;
 
   seed)
     bold "Loading the Godrej demo data"
+    require_module app.seed
     warn "This adds vendors, vehicles, drivers and worked freights. Not for a live database."
+    # Accepts y, Y and yes. The earlier version tested `= "y"`, so pressing Y or
+    # typing yes silently cancelled — the same bug that left a migration
+    # unapplied on a live box.
     printf "Continue? [y/N] "
     read -r reply
-    [ "$reply" = "y" ] || die "Cancelled"
+    case "$reply" in [Yy]*) ;; *) die "Cancelled" ;; esac
     dc exec -T api python -m app.seed
     ;;
 
@@ -136,6 +159,7 @@ case "${1:-}" in
     # settlement, no saved routes, an empty phonebook. A demo where two screens
     # work and nine are blank is worse than no demo.
     bold "Loading the demo data"
+    require_module app.demo
     dc exec -T api python -m app.seed
     dc exec -T api python -m app.demo
     ;;
