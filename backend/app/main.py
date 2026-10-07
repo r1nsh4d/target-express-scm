@@ -5,6 +5,7 @@ from app.api.routes import (
     advances,
     auth,
     billing,
+    company,
     consignments,
     dashboard,
     driver,
@@ -47,6 +48,7 @@ app.include_router(presets.router)
 app.include_router(freights.router)
 app.include_router(consignments.router)
 app.include_router(billing.router)
+app.include_router(company.router)
 app.include_router(expenses.router)
 app.include_router(uploads.router)
 app.include_router(public.admin_router)

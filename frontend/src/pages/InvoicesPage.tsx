@@ -16,6 +16,8 @@ import {
   Spinner,
   Table,
 } from '@/components/ui'
+import type { Company } from '@/components/TaxInvoice'
+import { TaxInvoice } from '@/components/TaxInvoice'
 import { api, apiErrorMessage } from '@/lib/api'
 import type { VendorDivision } from '@/lib/resources'
 import { STATUS_TONE, rupees, useItem, useList } from '@/lib/resources'
@@ -34,6 +36,13 @@ interface InvoiceRow {
   total: string
   status: string
   line_count: number
+  // Only the detail endpoint fills these; they are what the printed tax
+  // invoice needs beyond what the list shows.
+  vendor_name?: string | null
+  vendor_gstin?: string | null
+  vendor_billing_address?: string | null
+  place_of_supply_state_code?: string | null
+  total_in_words?: string
 }
 
 interface InvoiceLine {
@@ -364,7 +373,29 @@ function Row({ label, value }: { label: string; value: string }) {
   )
 }
 
+/* Where an invoice goes next. DRAFT is a working copy; ISSUED is the document
+   the vendor has been given; SENT records that it went; PAID stops it being
+   chased. Only ever one step forward, because skipping to PAID from a draft
+   nobody sent is how an unpaid invoice disappears. */
+const NEXT_STATUS: Record<string, { to: string; label: string } | undefined> = {
+  DRAFT: { to: 'ISSUED', label: 'Issue invoice' },
+  ISSUED: { to: 'SENT', label: 'Mark as sent' },
+  SENT: { to: 'PAID', label: 'Mark as paid' },
+}
+
 function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
+  const queryClient = useQueryClient()
+  const company = useItem<Company>('/company')
+
+  const setStatus = useMutation({
+    mutationFn: async (status: string) =>
+      (await api.patch(`/invoices/${id}`, { status })).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/invoices/${id}`] })
+      queryClient.invalidateQueries({ queryKey: ['/invoices'] })
+    },
+  })
+
   const invoice = useItem<Invoice>(`/invoices/${id}`)
 
   if (invoice.isLoading || !invoice.data) {
@@ -396,110 +427,45 @@ function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
             {inv.invoice_date}
           </p>
         </div>
-        <Button
-          variant="secondary"
-          icon={<Printer className="size-4" />}
-          onClick={() => window.print()}
-          className="print:hidden"
-        >
-          Print
-        </Button>
+        <div className="flex flex-wrap gap-2 print:hidden">
+          {/* An invoice does not sit at DRAFT forever. The next step in its
+              life is one button, and the one after that is the one that
+              matters: PAID is what stops it being chased. */}
+          {NEXT_STATUS[inv.status] ? (
+            <Button
+              loading={setStatus.isPending}
+              onClick={() => setStatus.mutate(NEXT_STATUS[inv.status]!.to)}
+            >
+              {NEXT_STATUS[inv.status]!.label}
+            </Button>
+          ) : null}
+          {inv.status !== 'CANCELLED' && inv.status !== 'PAID' ? (
+            <Button
+              variant="ghost"
+              loading={setStatus.isPending}
+              onClick={() => setStatus.mutate('CANCELLED')}
+            >
+              Cancel invoice
+            </Button>
+          ) : null}
+          <Button
+            variant="secondary"
+            icon={<Printer className="size-4" />}
+            onClick={() => window.print()}
+          >
+            Print
+          </Button>
+        </div>
       </div>
 
-      <Card className="overflow-hidden">
-        <Table
-          rows={inv.lines}
-          rowKey={(l) => l.id}
-          empty={<EmptyState title="No lines" />}
-          columns={[
-            { key: 'sl', header: '#', render: (l) => <span className="tnum">{l.sl_no}</span> },
-            { key: 'date', header: 'Date', render: (l) => <span className="tnum">{l.trip_date}</span> },
-            { key: 'trip', header: 'Freight', render: (l) => l.trip_no },
-            { key: 'lr', header: 'LR', render: (l) => l.lr_no ?? '—' },
-            { key: 'veh', header: 'Vehicle', render: (l) => l.vehicle_no },
-            {
-              key: 'dest',
-              header: 'Destination',
-              render: (l) => (
-                <span className="block max-w-[15rem] truncate">{l.destination_text}</span>
-              ),
-            },
-            { key: 'km', header: 'KM', align: 'right', render: (l) => <span className="tnum">{l.km}</span> },
-            {
-              key: 'base',
-              header: 'Base',
-              align: 'right',
-              render: (l) => <span className="tnum">{rupees(l.base_amount)}</span>,
-            },
-            {
-              key: 'xkm',
-              header: 'Extra km',
-              align: 'right',
-              render: (l) => <span className="tnum">{rupees(l.extra_km_amount)}</span>,
-            },
-            {
-              key: 'xpt',
-              header: 'Points',
-              align: 'right',
-              render: (l) => <span className="tnum">{rupees(l.extra_point_amount)}</span>,
-            },
-            {
-              key: 'toll',
-              header: 'Toll',
-              align: 'right',
-              render: (l) => <span className="tnum">{rupees(l.toll)}</span>,
-            },
-            {
-              key: 'unl',
-              header: 'Unloading',
-              align: 'right',
-              render: (l) => <span className="tnum">{rupees(l.unloading)}</span>,
-            },
-            {
-              // Its own column, never folded into Unloading. A vendor querying
-              // why unloading rose this month must be able to see the two
-              // apart — one is our crew's work on the rate sheet, the other is
-              // cash a local porter gang demanded at a market.
-              key: 'coolie',
-              header: 'Coolie',
-              align: 'right',
-              render: (l) =>
-                Number(l.coolie) > 0 ? (
-                  <span className="tnum" style={{ color: 'var(--warning)' }}>
-                    {rupees(l.coolie)}
-                  </span>
-                ) : (
-                  <span style={{ color: 'var(--text-faint)' }}>—</span>
-                ),
-            },
-            {
-              key: 'total',
-              header: 'Total',
-              align: 'right',
-              render: (l) => <span className="tnum font-semibold">{rupees(l.line_total)}</span>,
-            },
-          ]}
-        />
-      </Card>
+      {/* The document itself, not a screen with the numbers on it. This is what
+          goes to the vendor's accounts team. */}
+      {company.data ? (
+        <TaxInvoice invoice={inv as unknown as Parameters<typeof TaxInvoice>[0]['invoice']} company={company.data} />
+      ) : (
+        <div className="skeleton h-96" />
+      )}
 
-      <div className="flex justify-end">
-        <Card className="w-full max-w-sm space-y-1.5 p-5">
-          <Row label="Taxable value" value={inv.taxable_value} />
-          {Number(inv.igst) > 0 ? (
-            <Row label="IGST" value={inv.igst} />
-          ) : (
-            <>
-              <Row label="CGST" value={inv.cgst} />
-              <Row label="SGST" value={inv.sgst} />
-            </>
-          )}
-          <div className="groove my-2" />
-          <div className="flex items-baseline justify-between">
-            <span className="text-[13px] font-semibold">Total</span>
-            <span className="tnum text-[20px] font-semibold">{rupees(inv.total)}</span>
-          </div>
-        </Card>
-      </div>
     </div>
   )
 }

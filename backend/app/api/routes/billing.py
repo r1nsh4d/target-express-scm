@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import ACCOUNTS_ROLES, BACK_OFFICE_ROLES, require_roles
+from app.api.routes.company import amount_in_words
 from app.db.session import get_db
 from app.models.billing import VendorInvoice
 from app.models.enums import AdvanceStatus, InvoiceStatus, PayeeType, SettlementStatus
@@ -120,6 +121,15 @@ class InvoiceLineOut(ORMModel):
 
 class InvoiceOut(InvoiceRowOut):
     lines: list[InvoiceLineOut] = []
+    # Everything the printed document needs that the list does not.
+    vendor_name: str | None = None
+    vendor_gstin: str | None = None
+    vendor_billing_address: str | None = None
+    division_gstin: str | None = None
+    place_of_supply_state_code: str | None = None
+    # A tax invoice states the total in words as well as figures, and the
+    # vendor's accounts team reads the words to check the figure.
+    total_in_words: str = ""
 
 
 @router.post("/invoices/preview", response_model=PreviewOut)
@@ -195,9 +205,27 @@ def generate_invoice(payload: PeriodIn, db: Session = Depends(get_db), user: Use
 
 def _invoice_out(inv: VendorInvoice, with_lines: bool = False) -> InvoiceOut:
     out = InvoiceOut.model_validate(inv)
-    out.vendor_division_name = inv.vendor_division.name if inv.vendor_division else None
+    division = inv.vendor_division
+    out.vendor_division_name = division.name if division else None
     out.line_count = len(inv.lines)
-    out.lines = [InvoiceLineOut.model_validate(line) for line in inv.lines] if with_lines else []
+    out.lines = (
+        [InvoiceLineOut.model_validate(line) for line in inv.lines] if with_lines else []
+    )
+
+    # The printed document needs who it is addressed to, and under which GSTIN.
+    # A division carries its own where it has one, because Godrej's divisions
+    # bill separately; otherwise it falls back to the vendor's.
+    if division is not None:
+        out.division_gstin = division.gstin
+        out.place_of_supply_state_code = division.place_of_supply_state_code
+        out.vendor_billing_address = division.billing_address
+        vendor = division.vendor
+        if vendor is not None:
+            out.vendor_name = vendor.name
+            out.vendor_gstin = division.gstin or vendor.gstin
+            out.vendor_billing_address = division.billing_address or vendor.billing_address
+
+    out.total_in_words = amount_in_words(Decimal(inv.total or 0))
     return out
 
 
