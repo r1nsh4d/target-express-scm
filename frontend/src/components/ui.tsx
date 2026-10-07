@@ -2,6 +2,7 @@ import clsx from 'clsx'
 import { ChevronDown, X } from 'lucide-react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
 import { forwardRef, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { stagger } from '@/lib/motion'
 import { useTheme } from '@/lib/theme'
@@ -296,6 +297,7 @@ export function Modal({
   description,
   children,
   wide,
+  printable,
 }: {
   open: boolean
   onClose: () => void
@@ -303,6 +305,13 @@ export function Modal({
   description?: string
   children: ReactNode
   wide?: boolean
+  /* The dialog's contents are meant to go on paper — a sheet of labels, an
+     invoice. A dialog is `fixed` with its own scrollbar, and a browser prints
+     such a box as one clipped page: you get whatever happened to be on screen
+     and nothing below it. `printable` lets the print stylesheet lay this one
+     out as an ordinary flowing document instead, so forty stickers come out as
+     forty stickers rather than the nine that fitted in the window. */
+  printable?: boolean
 }) {
   useEffect(() => {
     if (!open) return
@@ -317,10 +326,27 @@ export function Modal({
 
   if (!open) return null
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8">
+  /* Rendered on `body`, not where it is written.
+     Two reasons. A `position: fixed` box inside an ancestor that has a
+     transform is positioned against THAT ancestor rather than the window, and
+     this app animates panels with transforms — so a dialog opened from inside
+     one could land off-centre or clipped. And the print stylesheet hides the
+     page in order to print a dialog's contents; a dialog nested inside the
+     page would be hidden along with it and print a blank sheet.
+     React still bubbles events through the component tree, so handlers on the
+     component that opened this are unaffected. */
+  return createPortal(
+    <div
+      className={clsx(
+        'fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8',
+        // Hooks for the print stylesheet. Named parts rather than
+        // `> div:first-child`, so reordering the markup cannot silently print
+        // the dialog header across the top of a sheet of labels.
+        printable && 'tx-print-sheet',
+      )}
+    >
       <div
-        className="tx-in-fade fixed inset-0 backdrop-blur-sm"
+        className="tx-in-fade tx-modal-backdrop fixed inset-0 backdrop-blur-sm"
         style={{ background: 'rgba(2,4,8,0.68)' }}
         onClick={onClose}
       />
@@ -353,7 +379,7 @@ export function Modal({
         {/* Sticky, so you can still see what you are filling in — and still
             reach the close button — once the body has scrolled. */}
         <div
-          className="sticky top-0 z-10 flex shrink-0 items-start justify-between gap-4 px-5 pt-5 pb-3"
+          className="tx-modal-head sticky top-0 z-10 flex shrink-0 items-start justify-between gap-4 px-5 pt-5 pb-3"
           style={{ background: 'var(--surface-solid)' }}
         >
           <div>
@@ -373,9 +399,10 @@ export function Modal({
             <X className="size-4" />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">{children}</div>
+        <div className="tx-modal-body min-h-0 flex-1 overflow-y-auto px-5 pb-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

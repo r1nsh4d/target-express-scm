@@ -582,6 +582,51 @@
       box-shadow: none !important;
     }
 
+    /* --- printing from inside a dialog ---------------------------------- */
+
+    /* A dialog is `position: fixed` with its own scrollbar, and a browser
+       prints that as ONE clipped page: whatever was on screen, nothing below.
+       Print a bill with forty stickers from the reprint dialog and nine come
+       out. So when a printable dialog is open it becomes the document — laid
+       out as ordinary flowing content, with the page behind it hidden. */
+    body:has(.tx-print-sheet) main {
+      display: none !important;
+    }
+
+    .tx-print-sheet {
+      position: static !important;
+      display: block !important;
+      overflow: visible !important;
+      padding: 0 !important;
+    }
+
+    /* The blurred backdrop would print as a grey wash over everything. */
+    .tx-print-sheet .tx-modal-backdrop {
+      display: none !important;
+    }
+
+    .tx-print-sheet [role='dialog'] {
+      position: static !important;
+      display: block !important;
+      max-height: none !important;
+      max-width: none !important;
+      width: 100% !important;
+      background: #fff !important;
+      border: 0 !important;
+      box-shadow: none !important;
+    }
+
+    /* The title and the close button are screen furniture, not part of the
+       sheet of labels. */
+    .tx-print-sheet .tx-modal-head {
+      display: none !important;
+    }
+
+    .tx-print-sheet .tx-modal-body {
+      overflow: visible !important;
+      padding: 0 !important;
+    }
+
     @page {
       margin: 8mm;
     }

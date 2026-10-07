@@ -279,6 +279,61 @@ def freight_labels(freight_id: str, db: Session = Depends(get_db), _=OpsDep):
     return labels
 
 
+@router.get("/consignments/{consignment_id}/labels", response_model=list[LabelOut])
+def consignment_labels(consignment_id: str, db: Session = Depends(get_db), _=OpsDep):
+    """The stickers for one bill.
+
+    The same sticker the freight-wide print produces, narrowed to a single
+    vendor bill — which is what you want when one bill turns up after the rest
+    have already been labelled, or when a carton's sticker is torn off in the
+    lorry and has to be reprinted. Printing the whole freight again to recover
+    four labels wastes a sheet and puts duplicate stickers in the godown.
+
+    A bill not yet on a freight still lists its boxes: the point number, colour
+    and trip number are simply blank, because they do not exist yet. Those are
+    the three biggest things on the sticker, so it says so rather than printing
+    a label that looks complete and sorts to nowhere.
+    """
+    consignment = db.get(Consignment, consignment_id)
+    if consignment is None:
+        raise HTTPException(status_code=404, detail="Consignment not found")
+
+    point = consignment.freight_point
+    freight = point.freight if point is not None else None
+    colour = (
+        POINT_COLOURS[(point.sequence - 1) % len(POINT_COLOURS)]
+        if point is not None
+        else "#6b7280"
+    )
+
+    total = len(consignment.boxes)
+    return [
+        LabelOut(
+            barcode=box.barcode,
+            point_sequence=point.sequence if point is not None else 0,
+            point_colour=colour,
+            consignee_name=(
+                point.consignee.name
+                if point is not None and point.consignee
+                else consignment.consignee.name
+            ),
+            city=(
+                point.consignee.city
+                if point is not None and point.consignee
+                else consignment.consignee.city
+            ),
+            vendor_bill_no=consignment.vendor_bill_no,
+            item_no=box.item_no,
+            of_total=total,
+            item_name=box.item_name,
+            trip_no=freight.trip_no if freight is not None else "",
+            lr_no=freight.lr_no if freight is not None else None,
+            floor_number=point.floor_number if point is not None else 0,
+        )
+        for box in sorted(consignment.boxes, key=lambda b: b.item_no)
+    ]
+
+
 class SortingSummaryOut(BaseModel):
     point_sequence: int
     point_colour: str

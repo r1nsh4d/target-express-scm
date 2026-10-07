@@ -299,6 +299,18 @@ export default function GuidePage() {
             opens the stop and presses <strong>Scan boxes</strong> — if a carton belongs to a
             different customer, the phone says so before it is handed over.
           </p>
+          <p>
+            <strong>To reprint one bill&rsquo;s stickers</strong>, do not print the freight again.
+            Open{' '}
+            <Link to="/consignments" style={{ color: 'var(--accent)' }}>
+              Consignments
+            </Link>{' '}
+            and click the bill: its stickers come up, with a Print button for just those. Use this
+            when a label is torn off in the lorry, or when a bill arrives after the rest of the
+            freight has already been labelled. The reprint is identical to the original, so the two
+            cannot be told apart — printing the whole freight a second time instead would put
+            duplicate stickers in the godown, and the crew would sort by whichever they read first.
+          </p>
           <p style={{ color: 'var(--text-faint)' }}>
             Nothing is forced. Some vendors&rsquo; cartons cannot take a sticker, so a point can
             always be delivered with a typed count instead.

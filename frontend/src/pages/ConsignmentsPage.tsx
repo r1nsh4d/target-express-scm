@@ -1,6 +1,8 @@
-import { Package, Plus } from 'lucide-react'
+import { Package, Plus, Printer, ScanBarcode } from 'lucide-react'
 import { useCallback, useState } from 'react'
 
+import type { Label } from '@/components/LabelCard'
+import { LabelCard } from '@/components/LabelCard'
 import {
   Badge,
   Button,
@@ -33,8 +35,21 @@ interface Consignment {
   freight_point_id: string | null
 }
 
+interface Box {
+  id: string
+  item_no: number
+  barcode: string
+  item_code: string | null
+  item_name: string | null
+  status: string
+}
+
 export default function ConsignmentsPage() {
   const [open, setOpen] = useState(false)
+  // The bill whose stickers are being looked at. Clicking a row opens them,
+  // because "which cartons are on this bill, and what is pasted on them" is
+  // the question the row itself cannot answer.
+  const [showing, setShowing] = useState<Consignment | null>(null)
 
   // The command palette's "New …" lands here with ?new=1.
   useOpenOnNewParam(useCallback(() => setOpen(true), []))
@@ -50,7 +65,7 @@ export default function ConsignmentsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        description="One vendor bill, for one delivery point, covering a number of boxes. Creating a bill generates a box per carton — those are what get labelled and counted at both ends."
+        description="One vendor bill, for one delivery point, covering a number of boxes. Creating a bill generates a box per carton — those are what get labelled and counted at both ends. Click a bill to see its stickers and reprint one."
         action={
           <Button
             icon={<Plus className="size-4" />}
@@ -92,6 +107,7 @@ export default function ConsignmentsPage() {
           <Table
             rows={consignments.data ?? []}
             rowKey={(c) => c.id}
+            onRowClick={(c) => setShowing(c)}
             empty={
               <EmptyState
                 icon={<Package className="size-7" />}
@@ -146,7 +162,96 @@ export default function ConsignmentsPage() {
         onClose={() => setOpen(false)}
         divisions={divisions.data ?? []}
       />
+
+      <StickerSheet consignment={showing} onClose={() => setShowing(null)} />
     </div>
+  )
+}
+
+/* The stickers on one bill.
+   Two jobs. The first is simply to answer "what is pasted on these cartons" —
+   the row says four boxes, this says which four and what each one reads. The
+   second is the reprint: a label torn off in the lorry, or a bill that turned
+   up after the freight was labelled. Reprinting the whole freight to recover
+   one sticker wastes a sheet and puts duplicates in the godown. */
+function StickerSheet({
+  consignment,
+  onClose,
+}: {
+  consignment: Consignment | null
+  onClose: () => void
+}) {
+  const id = consignment?.id
+  const labels = useList<Label>(`/consignments/${id}/labels`, undefined, !!id)
+  // The sticker does not carry a status — a printed label cannot change. The
+  // box rows do, which is how you see what has actually been scanned off the
+  // vehicle without leaving this screen.
+  const boxes = useList<Box>(`/consignments/${id}/boxes`, undefined, !!id)
+
+  const rows = labels.data ?? []
+  const statusOf = new Map((boxes.data ?? []).map((b) => [b.barcode, b.status]))
+  const onAFreight = rows.length > 0 && rows[0].point_sequence > 0
+
+  return (
+    <Modal
+      open={!!consignment}
+      onClose={onClose}
+      wide
+      printable
+      title={consignment ? `Bill ${consignment.vendor_bill_no}` : ''}
+      description={
+        consignment
+          ? `${consignment.consignee_name ?? 'Customer not named'} · ${
+              rows.length || consignment.declared_box_count
+            } boxes${onAFreight ? ` · point ${rows[0].point_sequence} on ${rows[0].trip_no}` : ''}`
+          : undefined
+      }
+    >
+      {labels.isLoading || boxes.isLoading ? (
+        <div className="flex justify-center py-12">
+          <Spinner className="size-5" />
+        </div>
+      ) : !rows.length ? (
+        <EmptyState
+          icon={<ScanBarcode className="size-7" />}
+          title="No boxes on this bill"
+          description="A bill normally generates one box per carton when it is created. This one has none, so there is nothing to label."
+        />
+      ) : (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
+            <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+              {onAFreight
+                ? 'These are the same stickers the freight print produces — a reprint is identical, so it cannot be confused with the original.'
+                : 'This bill is not on a freight yet, so the point number and trip are blank. Put it on a freight before labelling, or the carton sorts to nowhere.'}
+            </p>
+            <Button
+              variant="secondary"
+              icon={<Printer className="size-4" />}
+              onClick={() => window.print()}
+            >
+              Print {rows.length === 1 ? 'the sticker' : `${rows.length} stickers`}
+            </Button>
+          </div>
+
+          <div className="label-sheet grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {rows.map((label) => (
+              <div key={label.barcode} className="space-y-1">
+                <LabelCard label={label} />
+                {/* Screen only. A status printed on a sticker would be a lie
+                    the moment the carton moves. */}
+                <p
+                  className="px-1 text-[11px] print:hidden"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  {(statusOf.get(label.barcode) ?? '—').replace(/_/g, ' ').toLowerCase()}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
   )
 }
 
