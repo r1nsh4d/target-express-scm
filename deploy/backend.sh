@@ -12,6 +12,7 @@
 #   bash deploy/backend.sh test          run the test suite
 #   bash deploy/backend.sh bootstrap     create the 3 logins and one vehicle
 #   bash deploy/backend.sh seed          load the full Godrej demo data
+#   bash deploy/backend.sh demo          seed + everything that hangs off it
 #   bash deploy/backend.sh routes        list every endpoint
 #   bash deploy/backend.sh storage       check object storage is reachable
 #   bash deploy/backend.sh users         who can sign in, and with what role
@@ -125,6 +126,18 @@ case "${1:-}" in
     read -r reply
     [ "$reply" = "y" ] || die "Cancelled"
     dc exec -T api python -m app.seed
+    ;;
+
+  demo)
+    # Everything a client should see on a walkthrough.
+    #
+    # `seed` creates the masters and the freights, which leaves most screens
+    # saying "no data yet": no bills, so nothing to label; no invoice, no
+    # settlement, no saved routes, an empty phonebook. A demo where two screens
+    # work and nine are blank is worse than no demo.
+    bold "Loading the demo data"
+    dc exec -T api python -m app.seed
+    dc exec -T api python -m app.demo
     ;;
 
   routes)
