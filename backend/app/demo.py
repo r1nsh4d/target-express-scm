@@ -466,6 +466,50 @@ def add_invoice(db: Session, admin: User) -> None:
 
     if not raised:
         _say("no invoices raised")
+        return
+
+    _settle_one_invoice(db)
+
+
+def _settle_one_invoice(db: Session) -> None:
+    """Take one invoice all the way to paid, with a TDS deduction.
+
+    Money in is otherwise an empty screen, which is the failure this whole
+    module exists to prevent. And the deduction is the part worth showing: the
+    vendor credits 1% less than the invoice because TDS was withheld at source,
+    so the receipt and the bill legitimately disagree. A demo where they match
+    exactly teaches the client the wrong thing about their own money.
+    """
+    from app.models.billing import VendorInvoice
+    from app.models.enums import InvoiceStatus
+
+    invoice = (
+        db.execute(
+            select(VendorInvoice)
+            .where(VendorInvoice.status == InvoiceStatus.DRAFT)
+            .order_by(VendorInvoice.total.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+    if invoice is None:
+        return
+
+    total = Decimal(invoice.total or 0)
+    tds = (total / Decimal("100")).quantize(Decimal("0.01"))
+
+    invoice.status = InvoiceStatus.PAID
+    invoice.paid_on = date.today() - timedelta(days=4)
+    invoice.amount_received = total - tds
+    invoice.payment_mode = "NEFT"
+    invoice.payment_reference = "HDFCN52260914771"
+    db.commit()
+
+    _say(
+        f"payment recorded on {invoice.invoice_no}: "
+        f"{invoice.amount_received} received, {tds} withheld as TDS"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ import ConsignmentsPage from '@/pages/ConsignmentsPage'
 import ExpensesPage from '@/pages/ExpensesPage'
 import GuidePage from '@/pages/GuidePage'
 import InvoicesPage from '@/pages/InvoicesPage'
+import MoneyInPage from '@/pages/MoneyInPage'
 import LabelsPage from '@/pages/LabelsPage'
 import MarketVehiclesPage from '@/pages/MarketVehiclesPage'
 import RoutePresetsPage from '@/pages/RoutePresetsPage'
@@ -109,6 +110,7 @@ export default function App() {
         <Route path="route-presets" element={<RoutePresetsPage />} />
         <Route path="market-vehicles" element={<MarketVehiclesPage />} />
         <Route path="invoices" element={<InvoicesPage />} />
+        <Route path="money-in" element={<MoneyInPage />} />
         <Route path="settlements" element={<SettlementsPage />} />
         <Route path="advances" element={<AdvancesPage />} />
         <Route path="expenses" element={<ExpensesPage />} />

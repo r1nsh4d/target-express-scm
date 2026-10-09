@@ -224,6 +224,70 @@ def next_invoice_no(db: Session, division: VendorDivision, on: date) -> str:
     return f"{prefix}{(used or 0) + 1:03d}"
 
 
+def price_chosen(
+    db: Session, vendor_division_id, freight_ids: list
+) -> tuple[list[PricedFreight], list[str]]:
+    """Price exactly these freights, in trip order.
+
+    The period sweep takes everything finished between two dates, which is the
+    right default and the wrong thing when one freight is disputed, or is
+    waiting on a toll receipt, or simply belongs on next month's bill. Naming
+    the freights is how a bill gets raised for some of the work and not the
+    rest.
+
+    Anything that cannot go on an invoice is reported rather than quietly
+    dropped: billing four freights when five were ticked, and saying nothing,
+    is how work goes missing.
+    """
+    priced: list[PricedFreight] = []
+    problems: list[str] = []
+    seen: set = set()
+
+    for freight_id in freight_ids:
+        freight = db.get(Freight, freight_id)
+
+        if freight is None:
+            problems.append(f"{freight_id}: no such freight")
+            continue
+        if freight.id in seen:
+            continue
+        seen.add(freight.id)
+
+        if freight.vendor_division_id != vendor_division_id:
+            problems.append(f"{freight.trip_no}: belongs to a different vendor division")
+            continue
+        # Asked before the status check, and deliberately. A freight that has
+        # been invoiced is BILLED, so the status check would catch it first and
+        # answer "only a completed freight can be billed" — which is true,
+        # unhelpful, and sends somebody looking for a trip that never finished
+        # when the real answer is that it is already on invoice.
+        billed = db.scalar(
+            select(func.count())
+            .select_from(VendorInvoiceLine)
+            .where(VendorInvoiceLine.freight_id == freight.id)
+        )
+        if billed:
+            problems.append(f"{freight.trip_no}: is already on an invoice")
+            continue
+
+        if freight.status != FreightStatus.COMPLETED:
+            problems.append(
+                f"{freight.trip_no}: is {freight.status}, and only a completed freight "
+                "can be billed"
+            )
+            continue
+
+        try:
+            priced.append(price_freight(db, freight))
+        except RateCardNotFound:
+            problems.append(
+                f"{freight.trip_no} ({freight.trip_date}): no rate card covers this date"
+            )
+
+    priced.sort(key=lambda p: (p.freight.trip_date, p.freight.trip_no))
+    return priced, problems
+
+
 def create_invoice(
     db: Session,
     division: VendorDivision,
@@ -231,13 +295,30 @@ def create_invoice(
     period_to: date,
     invoice_date: date,
     issued_by_id=None,
+    freight_ids: list | None = None,
 ) -> VendorInvoice:
-    priced, problems = price_period(db, division.id, period_from, period_to)
+    """Raise an invoice, either for a period or for named freights.
+
+    With `freight_ids`, the period printed on the document is derived from the
+    freights actually on it rather than from whatever dates were typed. An
+    invoice that says "01 Aug to 07 Oct" but carries two trips from September
+    invites the question of what happened to the rest.
+    """
+    if freight_ids is not None:
+        if not freight_ids:
+            raise ValueError("No freights were selected")
+        priced, problems = price_chosen(db, division.id, freight_ids)
+    else:
+        priced, problems = price_period(db, division.id, period_from, period_to)
 
     if problems:
         raise ValueError("; ".join(problems))
     if not priced:
         raise ValueError("No completed, uninvoiced freights in that period")
+
+    if freight_ids is not None:
+        period_from = min(p.freight.trip_date for p in priced)
+        period_to = max(p.freight.trip_date for p in priced)
 
     taxable = money(sum((p.charge.line_total for p in priced), Decimal("0")))
     gst_rate = Decimal(division.gst_rate_percent or 0)

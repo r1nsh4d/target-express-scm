@@ -45,6 +45,22 @@ class VendorInvoice(BaseModel):
     )
     remarks: Mapped[str | None] = mapped_column(Text)
 
+    # --- what actually came in -------------------------------------------- #
+    #
+    # PAID on its own says a payment happened and nothing else. These say when,
+    # how much, and against which reference, which is what makes an invoice
+    # reconcilable against a bank statement.
+    #
+    # `amount_received` is kept separately from `total` and is often SMALLER:
+    # transport vendors deduct TDS at source, so a 92,478.40 invoice is settled
+    # by 91,553.62 and the balance appears later as a TDS credit. Writing the
+    # invoice total into the receipt would overstate money in and leave the
+    # bank reconciliation short with nothing to explain it.
+    paid_on: Mapped[date | None] = mapped_column(Date, index=True)
+    amount_received: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    payment_mode: Mapped[str | None] = mapped_column(String(24))
+    payment_reference: Mapped[str | None] = mapped_column(String(120))
+
     vendor_division: Mapped[VendorDivision] = relationship()
     lines: Mapped[list["VendorInvoiceLine"]] = relationship(
         back_populates="invoice", cascade="all, delete-orphan", order_by="VendorInvoiceLine.sl_no"

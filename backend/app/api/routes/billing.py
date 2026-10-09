@@ -44,9 +44,15 @@ class PeriodIn(BaseModel):
     period_from: date
     period_to: date
     invoice_date: date | None = None
+    # When given, ONLY these freights go on the invoice and the rest of the
+    # period is left alone. The period is still sent, because it is what the
+    # preview was built from and what the screen shows.
+    freight_ids: list[str] | None = None
 
 
 class PreviewLine(BaseModel):
+    # So the screen can tick individual freights and bill only those.
+    freight_id: str
     trip_no: str
     lr_no: str | None
     trip_date: date
@@ -95,6 +101,11 @@ class InvoiceRowOut(ORMModel):
     total: Decimal
     status: InvoiceStatus
     line_count: int = 0
+    # Present once a payment has been recorded.
+    paid_on: date | None = None
+    amount_received: Decimal | None = None
+    payment_mode: str | None = None
+    payment_reference: str | None = None
 
 
 class InvoiceLineOut(ORMModel):
@@ -161,6 +172,7 @@ def preview_invoice(payload: PeriodIn, db: Session = Depends(get_db), _=MoneyDep
         freight_count=len(priced),
         lines=[
             PreviewLine(
+                freight_id=str(p.freight.id),
                 trip_no=p.freight.trip_no,
                 lr_no=p.freight.lr_no,
                 trip_date=p.freight.trip_date,
@@ -201,6 +213,7 @@ def generate_invoice(payload: PeriodIn, db: Session = Depends(get_db), user: Use
             payload.period_to,
             payload.invoice_date or date.today(),
             issued_by_id=user.id,
+            freight_ids=payload.freight_ids,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -266,6 +279,31 @@ class InvoiceStatusIn(BaseModel):
     status: InvoiceStatus
 
 
+class PaymentIn(BaseModel):
+    paid_on: date | None = None
+    # Left out means "the whole invoice". Given, it is what the bank actually
+    # credited, which after a TDS deduction is less than the invoice total.
+    amount_received: Decimal | None = None
+    payment_mode: str | None = Field(default=None, max_length=24)
+    payment_reference: str | None = Field(default=None, max_length=120)
+
+
+class MoneyInRow(BaseModel):
+    invoice_id: str
+    invoice_no: str
+    vendor_division_name: str | None
+    invoice_date: date
+    paid_on: date
+    invoiced: Decimal
+    received: Decimal
+    # invoiced - received. Usually TDS; occasionally a short payment that needs
+    # chasing. Either way it is a number somebody has to account for, so it is
+    # shown rather than left to be worked out.
+    shortfall: Decimal
+    payment_mode: str | None
+    payment_reference: str | None
+
+
 @router.patch("/invoices/{invoice_id}", response_model=InvoiceRowOut)
 def set_invoice_status(
     invoice_id: str, payload: InvoiceStatusIn, db: Session = Depends(get_db), _=MoneyDep
@@ -273,10 +311,266 @@ def set_invoice_status(
     invoice = db.get(VendorInvoice, invoice_id)
     if invoice is None:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    # Moving off PAID un-records the receipt. An invoice that is no longer paid
+    # but still carries a payment date would keep showing up under money in,
+    # and the bank reconciliation would never balance.
+    if invoice.status == InvoiceStatus.PAID and payload.status != InvoiceStatus.PAID:
+        invoice.paid_on = None
+        invoice.amount_received = None
+        invoice.payment_mode = None
+        invoice.payment_reference = None
+
     invoice.status = payload.status
+
+    # Marked paid with no detail: assume today and the full amount, so the
+    # one-button path still produces a receipt that can be reconciled.
+    if payload.status == InvoiceStatus.PAID and invoice.paid_on is None:
+        invoice.paid_on = date.today()
+        invoice.amount_received = invoice.total
+
     db.commit()
     db.refresh(invoice)
     return _invoice_out(invoice)
+
+
+@router.post("/invoices/{invoice_id}/payment", response_model=InvoiceRowOut)
+def record_payment(
+    invoice_id: str, payload: PaymentIn, db: Session = Depends(get_db), _=MoneyDep
+):
+    """Record what the vendor actually paid, and mark the invoice paid.
+
+    Separate from the status flip because a payment is four facts, not one. The
+    one that matters is the amount: transport vendors deduct TDS at source, so
+    a 92,478.40 invoice is settled by 91,553.62 and the balance arrives later as
+    a credit. Recording the invoice total as the receipt would overstate money
+    in and leave the bank reconciliation short with nothing to explain it.
+
+    A draft cannot be paid. Money against a document that was never issued is
+    either the wrong invoice or a receipt that belongs somewhere else.
+    """
+    invoice = db.get(VendorInvoice, invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    if invoice.status == InvoiceStatus.DRAFT:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{invoice.invoice_no} is still a draft. Issue it before recording a "
+                "payment against it."
+            ),
+        )
+    if invoice.status == InvoiceStatus.CANCELLED:
+        raise HTTPException(
+            status_code=409, detail=f"{invoice.invoice_no} was cancelled."
+        )
+
+    received = (
+        money(payload.amount_received)
+        if payload.amount_received is not None
+        else Decimal(invoice.total or 0)
+    )
+    if received <= 0:
+        raise HTTPException(status_code=422, detail="A receipt has to be more than zero.")
+    if received > Decimal(invoice.total or 0):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{received} is more than the invoice total of {invoice.total}. "
+                "Check the figure — an overpayment is not recorded here."
+            ),
+        )
+
+    invoice.paid_on = payload.paid_on or date.today()
+    invoice.amount_received = received
+    invoice.payment_mode = payload.payment_mode
+    invoice.payment_reference = payload.payment_reference
+    invoice.status = InvoiceStatus.PAID
+
+    db.commit()
+    db.refresh(invoice)
+    return _invoice_out(invoice)
+
+
+@router.get("/money-in", response_model=list[MoneyInRow])
+def money_in(
+    period_from: date | None = None,
+    period_to: date | None = None,
+    db: Session = Depends(get_db),
+    _=MoneyDep,
+):
+    """Payments received, newest first.
+
+    The other side of Settlements, which is money going out. Reads from the
+    invoices themselves rather than a separate ledger, so a receipt cannot
+    disagree with the document it was paid against.
+    """
+    stmt = (
+        select(VendorInvoice)
+        .options(joinedload(VendorInvoice.vendor_division))
+        .where(VendorInvoice.status == InvoiceStatus.PAID, VendorInvoice.paid_on.isnot(None))
+        # id breaks the tie, or two payments on the same day swap places between
+        # one refresh and the next.
+        .order_by(VendorInvoice.paid_on.desc(), VendorInvoice.id)
+    )
+    if period_from:
+        stmt = stmt.where(VendorInvoice.paid_on >= period_from)
+    if period_to:
+        stmt = stmt.where(VendorInvoice.paid_on <= period_to)
+
+    rows = db.execute(stmt).unique().scalars().all()
+    return [
+        MoneyInRow(
+            invoice_id=str(inv.id),
+            invoice_no=inv.invoice_no,
+            vendor_division_name=inv.vendor_division.name if inv.vendor_division else None,
+            invoice_date=inv.invoice_date,
+            paid_on=inv.paid_on,
+            invoiced=Decimal(inv.total or 0),
+            received=Decimal(inv.amount_received or 0),
+            shortfall=money(Decimal(inv.total or 0) - Decimal(inv.amount_received or 0)),
+            payment_mode=inv.payment_mode,
+            payment_reference=inv.payment_reference,
+        )
+        for inv in rows
+    ]
+
+
+class BillFreightIn(BaseModel):
+    invoice_date: date | None = None
+
+
+@router.post("/freights/{freight_id}/bill", response_model=InvoiceOut, status_code=201)
+def bill_one_freight(
+    freight_id: str,
+    payload: BillFreightIn,
+    db: Session = Depends(get_db),
+    user: User = MoneyDep,
+):
+    """Raise an invoice for this freight alone.
+
+    BILLED is not a status anybody sets by hand — it follows from issuing an
+    invoice, so that a freight marked billed always has a document behind it.
+    That rule is right, but it left no way to bill one trip: you had to go to
+    Invoices, choose the division, and narrow a date range until it happened to
+    contain exactly the trip you wanted.
+
+    So the rule stays and the route gets shorter. This is the same code path as
+    the period run, given one freight.
+    """
+    freight = db.get(Freight, freight_id)
+    if freight is None:
+        raise HTTPException(status_code=404, detail="Freight not found")
+
+    division = db.get(VendorDivision, freight.vendor_division_id)
+    if division is None:
+        raise HTTPException(status_code=404, detail="Vendor division not found")
+
+    try:
+        invoice = create_invoice(
+            db,
+            division,
+            freight.trip_date,
+            freight.trip_date,
+            payload.invoice_date or date.today(),
+            issued_by_id=user.id,
+            freight_ids=[freight.id],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    db.commit()
+    db.refresh(invoice)
+    return _invoice_out(invoice, with_lines=True)
+
+
+@router.delete("/invoices/{invoice_id}/lines/{line_id}", response_model=InvoiceOut)
+def remove_invoice_line(
+    invoice_id: str, line_id: str, db: Session = Depends(get_db), _=MoneyDep
+):
+    """Take one freight off a draft and re-add up what is left.
+
+    The alternative when a draft is nearly right is to discard the whole thing
+    and generate again, which means re-ticking every other freight on it. A
+    trip that turns out to be disputed, or is waiting on a toll receipt, comes
+    off on its own.
+
+    The freight goes back to COMPLETED, so it appears on the next run rather
+    than disappearing. The last line cannot be removed — an invoice with no
+    lines is not a document, it is a number with a total of zero, and it should
+    be discarded instead.
+    """
+    invoice = db.get(VendorInvoice, invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.status != InvoiceStatus.DRAFT:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{invoice.invoice_no} is {invoice.status}. Only a draft can be edited.",
+        )
+
+    line = next((ln for ln in invoice.lines if str(ln.id) == line_id), None)
+    if line is None:
+        raise HTTPException(status_code=404, detail="That line is not on this invoice")
+
+    if len(invoice.lines) == 1:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "That is the only freight on this invoice. Discard the draft instead "
+                "of emptying it."
+            ),
+        )
+
+    freight = db.get(Freight, line.freight_id)
+    if freight is not None and freight.status == FreightStatus.BILLED:
+        freight.status = FreightStatus.COMPLETED
+
+    invoice.lines.remove(line)
+    db.flush()
+    _recompute(db, invoice)
+    db.commit()
+    db.refresh(invoice)
+    return _invoice_out(invoice, with_lines=True)
+
+
+def _recompute(db: Session, invoice: VendorInvoice) -> None:
+    """Re-add the totals, the tax and the serial numbers after a line changes.
+
+    Leaving the stored total behind after dropping a line would print a
+    document whose lines do not sum to its total — the single thing a vendor's
+    accounts team is certain to notice.
+    """
+    lines = sorted(invoice.lines, key=lambda ln: (ln.trip_date, ln.trip_no))
+    for i, line in enumerate(lines, start=1):
+        line.sl_no = i
+
+    taxable = money(sum((ln.line_total for ln in lines), Decimal("0")))
+    division = invoice.vendor_division
+    gst_rate = Decimal(division.gst_rate_percent or 0) if division else Decimal("0")
+    gst_total = money(taxable * gst_rate / Decimal("100"))
+
+    invoice.taxable_value = taxable
+    # Which heads the tax sits under was decided when the invoice was raised;
+    # recomputing must not silently move an inter-state bill to CGST+SGST.
+    if invoice.igst and invoice.igst > 0:
+        invoice.igst = gst_total
+        invoice.cgst = Decimal("0.00")
+        invoice.sgst = Decimal("0.00")
+    else:
+        half = money(gst_total / Decimal("2"))
+        invoice.cgst = half
+        invoice.sgst = money(gst_total - half)
+        invoice.igst = Decimal("0.00")
+
+    invoice.total = money(taxable + gst_total)
+
+    # The period on the document follows the work on it.
+    if lines:
+        invoice.period_from = min(ln.trip_date for ln in lines)
+        invoice.period_to = max(ln.trip_date for ln in lines)
+
+    db.flush()
 
 
 @router.delete("/invoices/{invoice_id}", status_code=204)

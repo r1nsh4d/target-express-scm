@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, FileText, Printer, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { ArrowLeft, FileText, Printer, Sparkles, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import {
   Badge,
@@ -36,6 +37,12 @@ interface InvoiceRow {
   total: string
   status: string
   line_count: number
+  // Set once a payment has been recorded. `amount_received` can be less than
+  // `total` — a TDS deduction at source is the normal case, not an error.
+  paid_on?: string | null
+  amount_received?: string | null
+  payment_mode?: string | null
+  payment_reference?: string | null
   // Only the detail endpoint fills these; they are what the printed tax
   // invoice needs beyond what the list shows.
   vendor_name?: string | null
@@ -80,6 +87,9 @@ interface Preview {
   vendor_division_name: string
   freight_count: number
   lines: {
+    // What the tick boxes send back, so the invoice can be raised for some of
+    // the period's freights and not others.
+    freight_id: string
     trip_no: string
     trip_date: string
     vehicle_no: string
@@ -99,6 +109,20 @@ export default function InvoicesPage() {
   const [openId, setOpenId] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const invoices = useList<InvoiceRow>('/invoices')
+
+  /* Billing a freight from the trip screen lands here with ?open=<id>, so the
+     invoice it just raised is on screen rather than one row in a list. The
+     parameter is consumed on arrival — a back button that reopens it would be
+     confusing, and a reload should not force it open again. */
+  const [params, setParams] = useSearchParams()
+  useEffect(() => {
+    const wanted = params.get('open')
+    if (!wanted) return
+    setOpenId(wanted)
+    const next = new URLSearchParams(params)
+    next.delete('open')
+    setParams(next, { replace: true })
+  }, [params, setParams])
 
   if (openId) return <InvoiceDetail id={openId} onBack={() => setOpenId(null)} />
 
@@ -198,14 +222,54 @@ function GenerateModal({
   const [preview, setPreview] = useState<Preview | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  /* Which freights actually go on the bill.
+
+     The period sweep is the right default — it is how a month gets billed —
+     but it is the wrong thing when one trip is disputed, is waiting on a toll
+     receipt, or belongs on next month's invoice. Before this, the only way to
+     leave one out was to narrow the dates until the range happened to exclude
+     it, and raising a bill for a Tuesday and a Friday but not the Wednesday in
+     between was simply not possible.
+
+     Everything previewed starts ticked, so the common case is still one
+     button. */
+  const [chosen, setChosen] = useState<Set<string>>(new Set())
+
+  function showPreview(p: Preview) {
+    setPreview(p)
+    setChosen(new Set(p.lines.map((l) => l.freight_id)))
+  }
+
+  function toggle(freightId: string) {
+    setChosen((current) => {
+      const next = new Set(current)
+      if (next.has(freightId)) next.delete(freightId)
+      else next.add(freightId)
+      return next
+    })
+  }
+
+  /* Totals for what is TICKED, not for the period.
+
+     The server re-does this arithmetic and its answer is the one that gets
+     stored; this is only so the figure on screen is the figure about to be
+     billed. Showing the period's total next to a part-selection would be a
+     number that matches neither the lines above it nor the invoice produced. */
+  const picked = (preview?.lines ?? []).filter((l) => chosen.has(l.freight_id))
+  const pickedTaxable = picked.reduce((sum, l) => sum + Number(l.line_total), 0)
+  const pickedGst = preview
+    ? (pickedTaxable * Number(preview.gst_rate_percent)) / 100
+    : 0
+
   const doPreview = useMutation({
     mutationFn: async () => (await api.post<Preview>('/invoices/preview', form)).data,
-    onSuccess: setPreview,
+    onSuccess: showPreview,
     onError: (e) => setError(apiErrorMessage(e)),
   })
 
   const doGenerate = useMutation({
-    mutationFn: async () => (await api.post<Invoice>('/invoices', form)).data,
+    mutationFn: async () =>
+      (await api.post<Invoice>('/invoices', { ...form, freight_ids: [...chosen] })).data,
     onSuccess: (inv) => {
       queryClient.invalidateQueries({ queryKey: ['/invoices'] })
       queryClient.invalidateQueries({ queryKey: ['/freights'] })
@@ -232,6 +296,7 @@ function GenerateModal({
               onChange={(e) => {
                 setForm({ ...form, vendor_division_id: e.target.value })
                 setPreview(null)
+                setChosen(new Set())
               }}
             >
               <option value="">Select</option>
@@ -249,6 +314,7 @@ function GenerateModal({
               onChange={(e) => {
                 setForm({ ...form, period_from: e.target.value })
                 setPreview(null)
+                setChosen(new Set())
               }}
             />
           </Field>
@@ -259,6 +325,7 @@ function GenerateModal({
               onChange={(e) => {
                 setForm({ ...form, period_to: e.target.value })
                 setPreview(null)
+                setChosen(new Set())
               }}
             />
           </Field>
@@ -299,10 +366,36 @@ function GenerateModal({
               </div>
             ) : null}
 
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+                {chosen.size} of {preview.lines.length} selected. Anything left unticked stays
+                unbilled and comes up on the next run.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setChosen(new Set(preview.lines.map((l) => l.freight_id)))}
+                >
+                  Select all
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setChosen(new Set())}
+                >
+                  Clear
+                </Button>
+              </div>
+            </div>
+
             <Card className="overflow-hidden">
               <Table
                 rows={preview.lines}
-                rowKey={(l) => l.trip_no}
+                rowKey={(l) => l.freight_id}
+                onRowClick={(l) => toggle(l.freight_id)}
                 empty={
                   <EmptyState
                     title="Nothing to bill"
@@ -310,6 +403,21 @@ function GenerateModal({
                   />
                 }
                 columns={[
+                  {
+                    key: 'pick',
+                    header: '',
+                    width: '2.5rem',
+                    render: (l) => (
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-[var(--accent)]"
+                        checked={chosen.has(l.freight_id)}
+                        onChange={() => toggle(l.freight_id)}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`Include ${l.trip_no}`}
+                      />
+                    ),
+                  },
                   { key: 'trip', header: 'Freight', render: (l) => l.trip_no },
                   { key: 'date', header: 'Date', render: (l) => <span className="tnum">{l.trip_date}</span> },
                   {
@@ -324,20 +432,39 @@ function GenerateModal({
                     key: 'total',
                     header: 'Amount',
                     align: 'right',
-                    render: (l) => <span className="tnum">{rupees(l.line_total)}</span>,
+                    render: (l) => (
+                      <span
+                        className="tnum"
+                        style={chosen.has(l.freight_id) ? undefined : { color: 'var(--text-faint)' }}
+                      >
+                        {rupees(l.line_total)}
+                      </span>
+                    ),
                   },
                 ]}
               />
             </Card>
 
             <div className="inset space-y-1.5 p-4">
-              <Row label={`Taxable value (${preview.freight_count} freights)`} value={preview.taxable_value} />
-              <Row label={`GST at ${preview.gst_rate_percent}%`} value={preview.gst_amount} />
+              <Row
+                label={`Taxable value (${picked.length} freight${picked.length === 1 ? '' : 's'})`}
+                value={pickedTaxable.toFixed(2)}
+              />
+              <Row label={`GST at ${preview.gst_rate_percent}%`} value={pickedGst.toFixed(2)} />
               <div className="groove my-1.5" />
               <div className="flex items-baseline justify-between">
                 <span className="text-[13px] font-semibold">Invoice total</span>
-                <span className="tnum text-[18px] font-semibold">{rupees(preview.total)}</span>
+                <span className="tnum text-[18px] font-semibold">
+                  {rupees((pickedTaxable + pickedGst).toFixed(2))}
+                </span>
               </div>
+              {picked.length < preview.lines.length ? (
+                <p className="pt-1 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                  {preview.lines.length - picked.length} freight
+                  {preview.lines.length - picked.length === 1 ? '' : 's'} left off this invoice,
+                  still unbilled.
+                </p>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -349,14 +476,16 @@ function GenerateModal({
             Cancel
           </Button>
           <Button
-            disabled={!preview || !preview.freight_count}
+            disabled={!preview || chosen.size === 0}
             loading={doGenerate.isPending}
             onClick={() => {
               setError(null)
               doGenerate.mutate()
             }}
           >
-            Create invoice
+            {chosen.size && preview && chosen.size < preview.lines.length
+              ? `Bill ${chosen.size} freight${chosen.size === 1 ? '' : 's'}`
+              : 'Create invoice'}
           </Button>
         </div>
       </div>
@@ -407,6 +536,21 @@ function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
     },
   })
   const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [paying, setPaying] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const removeLine = useMutation({
+    mutationFn: async (lineId: string) =>
+      (await api.delete(`/invoices/${id}/lines/${lineId}`)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/invoices/${id}`] })
+      queryClient.invalidateQueries({ queryKey: ['/invoices'] })
+      // The freight that came off is COMPLETED again.
+      queryClient.invalidateQueries({ queryKey: ['/freights'] })
+    },
+    onError: (e) => setActionError(apiErrorMessage(e)),
+  })
 
   const invoice = useItem<Invoice>(`/invoices/${id}`)
 
@@ -443,12 +587,29 @@ function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
           {/* An invoice does not sit at DRAFT forever. The next step in its
               life is one button, and the one after that is the one that
               matters: PAID is what stops it being chased. */}
-          {NEXT_STATUS[inv.status] ? (
+          {/* SENT -> PAID is not a status flip. A payment is four facts —
+              when, how much, how, and against what reference — and the amount
+              is routinely LESS than the invoice because of TDS deducted at
+              source. Flipping a flag would record the invoice total as money
+              in, and the bank reconciliation would be short with nothing to
+              explain it. */}
+          {inv.status === 'SENT' ? (
+            <Button onClick={() => setPaying(true)}>Record payment</Button>
+          ) : NEXT_STATUS[inv.status] ? (
             <Button
               loading={setStatus.isPending}
               onClick={() => setStatus.mutate(NEXT_STATUS[inv.status]!.to)}
             >
               {NEXT_STATUS[inv.status]!.label}
+            </Button>
+          ) : null}
+
+          {/* A draft is a working copy, so a freight that turns out to be
+              disputed can come off it without discarding and re-ticking
+              everything else. */}
+          {inv.status === 'DRAFT' && inv.lines.length > 1 ? (
+            <Button variant="secondary" onClick={() => setEditing(true)}>
+              Edit lines
             </Button>
           ) : null}
           {/* A draft is a working copy — nobody has seen it, so it can simply
@@ -478,7 +639,7 @@ function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
             icon={<Printer className="size-4" />}
             onClick={() => window.print()}
           >
-            Print
+            Print / PDF
           </Button>
         </div>
       </div>
@@ -490,6 +651,97 @@ function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
       ) : (
         <div className="skeleton h-96" />
       )}
+
+      <Modal
+        open={editing}
+        onClose={() => {
+          setEditing(false)
+          setActionError(null)
+        }}
+        wide
+        title={`Edit ${inv.invoice_no}`}
+        description="Take a freight off this draft. It goes back to Completed and comes up on the next invoice."
+      >
+        <div className="space-y-3">
+          <Card className="overflow-hidden">
+            <Table
+              rows={inv.lines}
+              rowKey={(l) => l.id}
+              columns={[
+                { key: 'sl', header: '#', render: (l) => <span className="tnum">{l.sl_no}</span> },
+                { key: 'trip', header: 'Freight', render: (l) => l.trip_no },
+                {
+                  key: 'date',
+                  header: 'Date',
+                  render: (l) => <span className="tnum">{l.trip_date}</span>,
+                },
+                {
+                  key: 'dest',
+                  header: 'Destination',
+                  render: (l) => (
+                    <span className="block max-w-[14rem] truncate">{l.destination_text}</span>
+                  ),
+                },
+                {
+                  key: 'amount',
+                  header: 'Amount',
+                  align: 'right',
+                  render: (l) => <span className="tnum">{rupees(l.line_total)}</span>,
+                },
+                {
+                  key: 'remove',
+                  header: '',
+                  align: 'right',
+                  render: (l) => (
+                    <button
+                      type="button"
+                      className="rounded-lg p-1.5 hover:bg-[var(--surface-hover)]"
+                      style={{ color: 'var(--danger)' }}
+                      aria-label={`Remove ${l.trip_no}`}
+                      disabled={removeLine.isPending || inv.lines.length === 1}
+                      onClick={() => {
+                        setActionError(null)
+                        removeLine.mutate(l.id)
+                      }}
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  ),
+                },
+              ]}
+            />
+          </Card>
+
+          <ErrorNote>{actionError}</ErrorNote>
+          <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+            The totals and the serial numbers are re-added after every change. The last freight
+            cannot be removed — discard the draft instead.
+          </p>
+          <div className="flex justify-end">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setEditing(false)
+                setActionError(null)
+              }}
+            >
+              Done
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <PaymentModal
+        invoice={inv}
+        open={paying}
+        onClose={() => setPaying(false)}
+        onDone={() => {
+          setPaying(false)
+          queryClient.invalidateQueries({ queryKey: [`/invoices/${id}`] })
+          queryClient.invalidateQueries({ queryKey: ['/invoices'] })
+          queryClient.invalidateQueries({ queryKey: ['/money-in'] })
+        }}
+      />
 
       <Modal
         open={confirmDiscard}
@@ -518,5 +770,120 @@ function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
         </div>
       </Modal>
     </div>
+  )
+}
+
+/* Recording what the vendor actually paid.
+
+   Deliberately not a status flip. A payment is four facts, and the one that
+   matters most is the amount: transport vendors deduct TDS at source, so a
+   92,478.40 invoice is settled by 91,553.62 and the balance turns up months
+   later as a credit. Writing the invoice total into the receipt would overstate
+   money in and leave the bank reconciliation short with nothing to explain the
+   gap — so the amount is editable, and the shortfall is named on screen before
+   it is saved rather than discovered at year end. */
+function PaymentModal({
+  invoice,
+  open,
+  onClose,
+  onDone,
+}: {
+  invoice: Invoice
+  open: boolean
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [paidOn, setPaidOn] = useState(new Date().toISOString().slice(0, 10))
+  const [amount, setAmount] = useState(invoice.total)
+  const [mode, setMode] = useState('NEFT')
+  const [reference, setReference] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const pay = useMutation({
+    mutationFn: async () =>
+      (
+        await api.post(`/invoices/${invoice.id}/payment`, {
+          paid_on: paidOn,
+          amount_received: amount,
+          payment_mode: mode || null,
+          payment_reference: reference || null,
+        })
+      ).data,
+    onSuccess: onDone,
+    onError: (e) => setError(apiErrorMessage(e)),
+  })
+
+  const shortfall = Number(invoice.total) - Number(amount || 0)
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`Payment against ${invoice.invoice_no}`}
+      description="This is what goes into Money in, so it should match the bank credit rather than the invoice."
+    >
+      <div className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Received on">
+            <Input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} />
+          </Field>
+          <Field label="Amount received" hint={`Invoice total ${rupees(invoice.total)}`}>
+            <Input
+              className="tnum"
+              type="number"
+              step="0.01"
+              min="0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </Field>
+        </div>
+
+        {shortfall > 0 ? (
+          <div
+            className="rounded-[var(--radius-control)] px-3.5 py-3 text-[12.5px]"
+            style={{
+              background: 'color-mix(in oklab, var(--warning) 12%, transparent)',
+              color: 'var(--text)',
+            }}
+          >
+            <strong>{rupees(shortfall.toFixed(2))}</strong> short of the invoice. That is normal
+            when TDS has been deducted at source — it will show as a shortfall under Money in so
+            it can be set against the TDS credit later.
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Mode">
+            <Select value={mode} onChange={(e) => setMode(e.target.value)}>
+              <option value="NEFT">NEFT / RTGS</option>
+              <option value="UPI">UPI</option>
+              <option value="CHEQUE">Cheque</option>
+              <option value="CASH">Cash</option>
+              <option value="OTHER">Other</option>
+            </Select>
+          </Field>
+          <Field label="Reference" hint="UTR, cheque number — what to look for on the statement">
+            <Input value={reference} onChange={(e) => setReference(e.target.value)} />
+          </Field>
+        </div>
+
+        <ErrorNote>{error}</ErrorNote>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            loading={pay.isPending}
+            onClick={() => {
+              setError(null)
+              pay.mutate()
+            }}
+          >
+            Record payment
+          </Button>
+        </div>
+      </div>
+    </Modal>
   )
 }

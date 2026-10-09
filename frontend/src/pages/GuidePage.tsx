@@ -157,7 +157,11 @@ const RUN: Step[] = [
     why: 'The completed freight prices itself on the rate card in force on its date, and produces what the driver or vehicle owner is owed.',
     todo: [
       'Check the freight’s billing panel — every line shows the working behind it.',
-      'Raise the vendor invoice for a period, and settle the driver or owner.',
+      'Bill one freight from its own screen, or raise an invoice for a period under Vendor invoices and tick the freights that go on it. Anything left unticked stays unbilled and comes up next time.',
+      'A freight reaches BILLED because an invoice exists, never by hand — so a billed freight always has a document behind it.',
+      'A draft can be edited or discarded; once issued it can only be cancelled, because the number has gone to the vendor.',
+      'Record the payment when it arrives. Enter what the BANK credited, not the invoice total — TDS deducted at source makes them differ, and the gap shows under Money in.',
+      'Settle the driver or vehicle owner for the same work.',
     ],
   },
 ]

@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   Copy,
@@ -6,6 +6,7 @@ import {
   HandCoins,
   Package2,
   Replace,
+  ReceiptIndianRupee,
   Gauge,
   Link2,
   GitBranch,
@@ -70,6 +71,20 @@ export default function TripDetailPage() {
   }
 
   const dispatch = useAction<undefined>(`${path}/dispatch`, { onSuccess: refresh })
+
+  /* Raise an invoice for this freight alone, then open it.
+     The freight becomes BILLED as a consequence of the invoice existing, which
+     is the rule everywhere else — this only saves the trip to Invoices and the
+     date-range fiddling that billing one freight used to need. */
+  const bill = useMutation({
+    mutationFn: async () => (await api.post(`${path}/bill`, {})).data as { id: string },
+    onSuccess: (invoice) => {
+      refresh()
+      queryClient.invalidateQueries({ queryKey: ['/invoices'] })
+      navigate(`/invoices?open=${invoice.id}`)
+    },
+    onError: (err) => setError(apiErrorMessage(err)),
+  })
 
   if (trip.isLoading) {
     return (
@@ -148,6 +163,22 @@ export default function TripDetailPage() {
               onClick={() => setSwapping(true)}
             >
               Swap vehicle
+            </Button>
+          ) : null}
+          {/* A completed freight is billed from here, not by going to Invoices
+              and narrowing a date range until it happens to contain this one
+              trip. BILLED still follows from issuing an invoice — this raises
+              the invoice, it does not set the flag. */}
+          {t.status === 'COMPLETED' ? (
+            <Button
+              icon={<ReceiptIndianRupee className="size-4" />}
+              loading={bill.isPending}
+              onClick={() => {
+                setError(null)
+                bill.mutate()
+              }}
+            >
+              Bill this freight
             </Button>
           ) : null}
           {canDispatch ? (
