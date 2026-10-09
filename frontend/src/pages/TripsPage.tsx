@@ -155,6 +155,36 @@ function TripForm({ open, onClose }: { open: boolean; onClose: () => void }) {
   const divisions = useList<VendorDivision>('/vendor-divisions')
   const consignees = useList<Consignee>('/consignees')
 
+  /* The bills already entered and not yet on any freight.
+     A point is a customer, but the WORK is the bills waiting for that customer
+     — and nothing on this form said which customers had any. You picked names
+     out of a list of every customer the company has ever had, created the
+     trip, and only found out at the assign step that you had added a stop with
+     nothing to drop there, or missed one with four bills waiting. */
+  const waiting = useList<{ consignee_id: string; declared_box_count: number }>(
+    '/consignments',
+    { unassigned: true },
+    open,
+  )
+
+  const billsFor = new Map<string, { bills: number; boxes: number }>()
+  for (const bill of waiting.data ?? []) {
+    const row = billsFor.get(bill.consignee_id) ?? { bills: 0, boxes: 0 }
+    row.bills += 1
+    row.boxes += bill.declared_box_count
+    billsFor.set(bill.consignee_id, row)
+  }
+
+  /* Customers with bills waiting first, in bill order, then everyone else
+     alphabetically. The ones you almost certainly want are at the top of the
+     list instead of buried alphabetically among two hundred dealers. */
+  const sortedConsignees = [...(consignees.data ?? [])].sort((a, b) => {
+    const aw = billsFor.get(a.id)?.bills ?? 0
+    const bw = billsFor.get(b.id)?.bills ?? 0
+    if (aw !== bw) return bw - aw
+    return a.name.localeCompare(b.name)
+  })
+
   const [divisionId, setDivisionId] = useState('')
   const [warehouseId, setWarehouseId] = useState('')
   const [tripDate, setTripDate] = useState(new Date().toISOString().slice(0, 10))
@@ -217,7 +247,7 @@ function TripForm({ open, onClose }: { open: boolean; onClose: () => void }) {
       onClose={onClose}
       wide
       title="New trip"
-      description="Points are delivered in the order listed. Drag order comes later — for now, add them in sequence."
+      description="A point is one customer — one stop. Add them in the order they will be delivered. The bills go on afterwards, at each point."
     >
       <form
         className="space-y-5"
@@ -286,9 +316,17 @@ function TripForm({ open, onClose }: { open: boolean; onClose: () => void }) {
 
         <div>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold tracking-[0.14em] uppercase" style={{ color: 'var(--text-faint)' }}>
-              Delivery points ({points.length})
-            </p>
+            <div>
+              <p className="text-[11px] font-semibold tracking-[0.14em] uppercase" style={{ color: 'var(--text-faint)' }}>
+                Delivery points ({points.length})
+              </p>
+              {waiting.data?.length ? (
+                <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                  {billsFor.size} customer{billsFor.size > 1 ? 's have' : ' has'} bills waiting —
+                  those are listed first.
+                </p>
+              ) : null}
+            </div>
             <div className="flex gap-2">
               {points.filter((p) => p.consignee_id).length > 1 ? (
                 <Button
@@ -335,12 +373,16 @@ function TripForm({ open, onClose }: { open: boolean; onClose: () => void }) {
                     required
                   >
                     <option value="">Select customer</option>
-                    {consignees.data?.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                        {c.city ? ` · ${c.city}` : ''}
-                      </option>
-                    ))}
+                    {sortedConsignees.map((c) => {
+                      const w = billsFor.get(c.id)
+                      return (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                          {c.city ? ` · ${c.city}` : ''}
+                          {w ? `  —  ${w.bills} bill${w.bills > 1 ? 's' : ''}, ${w.boxes} boxes waiting` : ''}
+                        </option>
+                      )
+                    })}
                   </Select>
                   <Input
                     className="tnum"

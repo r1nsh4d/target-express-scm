@@ -51,6 +51,40 @@ function Recentre({ position }: { position: [number, number] | null }) {
   return null
 }
 
+/* Tell Leaflet how big it actually is.
+   Leaflet measures its container once, at mount, and caches that size to decide
+   which tiles to fetch. Inside a dialog that is mid-animation it measures the
+   scaled, not-yet-settled box — so it loads tiles for a viewport that no longer
+   exists and the map comes up half drawn, with grey where the rest should be.
+   The same thing happens when the dialog is scrolled or the window resized.
+
+   So: recheck once the entry animation has finished, and keep watching the
+   container afterwards. invalidateSize is cheap and idempotent. */
+function KeepSized() {
+  const map = useMap()
+
+  useEffect(() => {
+    const fix = () => map.invalidateSize({ animate: false })
+
+    // After the dialog's scale-in settles (0.28s), and once more a beat later
+    // for a slow layout. Two cheap calls are better than a map nobody can use.
+    const timers = [60, 320, 600].map((ms) => window.setTimeout(fix, ms))
+
+    const container = map.getContainer()
+    const observer = new ResizeObserver(fix)
+    observer.observe(container)
+    window.addEventListener('resize', fix)
+
+    return () => {
+      timers.forEach(window.clearTimeout)
+      observer.disconnect()
+      window.removeEventListener('resize', fix)
+    }
+  }, [map])
+
+  return null
+}
+
 export function LocationPicker({
   value,
   onChange,
@@ -131,6 +165,7 @@ export function LocationPicker({
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
+          <KeepSized />
           <ClickToPlace onPick={set} />
           <Recentre position={position} />
           {position ? <Marker position={position} icon={PIN} /> : null}

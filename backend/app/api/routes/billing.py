@@ -4,7 +4,7 @@
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
@@ -13,8 +13,15 @@ from app.api.deps import ACCOUNTS_ROLES, BACK_OFFICE_ROLES, require_roles
 from app.api.routes.company import amount_in_words
 from app.db.session import get_db
 from app.models.billing import VendorInvoice
-from app.models.enums import AdvanceStatus, InvoiceStatus, PayeeType, SettlementStatus
+from app.models.enums import (
+    AdvanceStatus,
+    FreightStatus,
+    InvoiceStatus,
+    PayeeType,
+    SettlementStatus,
+)
 from app.models.fleet import Driver, VehicleOwner
+from app.models.freight import Freight
 from app.models.settlement import Advance, FreightPayout, Settlement
 from app.models.user import User
 from app.models.vendor import VendorDivision
@@ -270,6 +277,53 @@ def set_invoice_status(
     db.commit()
     db.refresh(invoice)
     return _invoice_out(invoice)
+
+
+@router.delete("/invoices/{invoice_id}", status_code=204)
+def discard_invoice(invoice_id: str, db: Session = Depends(get_db), _=MoneyDep):
+    """Throw away a draft and give its freights back.
+
+    Generating an invoice is one button and it sweeps up every completed
+    freight in the period. Pick the wrong division, or a period a week too
+    wide, and the mistake was permanent: the freights were already flipped to
+    BILLED, which is the one status an admin may not set by hand, so they could
+    not be put back and could not be invoiced again. The only repair was to
+    issue a document nobody wanted, or edit the database.
+
+    So a DRAFT can be discarded. Its freights go back to COMPLETED and are
+    available to the next run.
+
+    Only a DRAFT. Once an invoice is ISSUED it has a number the vendor has
+    seen, and a tax invoice that has left the building is cancelled, not
+    deleted — the number must stay in the series or the series has a hole in
+    it, which is exactly what an auditor looks for.
+    """
+    invoice = db.get(VendorInvoice, invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    if invoice.status != InvoiceStatus.DRAFT:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{invoice.invoice_no} is {invoice.status}, not a draft. An invoice "
+                "the vendor has already seen is cancelled, not deleted — its number "
+                "has to stay in the series."
+            ),
+        )
+
+    # Hand the freights back, or they stay BILLED against an invoice that no
+    # longer exists and can never be billed again.
+    released = 0
+    for line in invoice.lines:
+        freight = db.get(Freight, line.freight_id)
+        if freight is not None and freight.status == FreightStatus.BILLED:
+            freight.status = FreightStatus.COMPLETED
+            released += 1
+
+    db.delete(invoice)
+    db.commit()
+    return Response(status_code=204)
 
 
 # --------------------------------------------------------------------------- #

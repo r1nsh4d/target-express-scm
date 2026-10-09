@@ -171,8 +171,10 @@ function CustomerForm({ open, onClose }: { open: boolean; onClose: () => void })
     },
   })
 
+  // Wide: this form carries a map as well as the address fields, and at the
+  // narrow width the map was a 260px strip you could not aim a pin in.
   return (
-    <Modal open={open} onClose={onClose} title="New customer">
+    <Modal open={open} onClose={onClose} wide title="New customer">
       <form
         className="space-y-4"
         onSubmit={(e) => {

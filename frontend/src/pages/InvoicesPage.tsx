@@ -396,6 +396,18 @@ function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
     },
   })
 
+  const discard = useMutation({
+    mutationFn: async () => (await api.delete(`/invoices/${id}`)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/invoices'] })
+      // The freights that were on it are COMPLETED again and will show up on
+      // the next invoice, so anything listing them is now stale.
+      queryClient.invalidateQueries({ queryKey: ['/freights'] })
+      onBack()
+    },
+  })
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+
   const invoice = useItem<Invoice>(`/invoices/${id}`)
 
   if (invoice.isLoading || !invoice.data) {
@@ -439,7 +451,20 @@ function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
               {NEXT_STATUS[inv.status]!.label}
             </Button>
           ) : null}
-          {inv.status !== 'CANCELLED' && inv.status !== 'PAID' ? (
+          {/* A draft is a working copy — nobody has seen it, so it can simply
+              go away and its freights become available again. Once ISSUED the
+              number has left the building and the document is cancelled
+              instead, because a gap in the invoice series is the first thing
+              an auditor asks about. */}
+          {inv.status === 'DRAFT' ? (
+            <Button
+              variant="ghost"
+              loading={discard.isPending}
+              onClick={() => setConfirmDiscard(true)}
+            >
+              Discard draft
+            </Button>
+          ) : inv.status !== 'CANCELLED' && inv.status !== 'PAID' ? (
             <Button
               variant="ghost"
               loading={setStatus.isPending}
@@ -466,6 +491,32 @@ function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
         <div className="skeleton h-96" />
       )}
 
+      <Modal
+        open={confirmDiscard}
+        onClose={() => setConfirmDiscard(false)}
+        title={`Discard ${inv.invoice_no}?`}
+        description="Nothing has been sent to the vendor yet, so this draft can simply go away."
+      >
+        <div className="space-y-4">
+          <p className="text-[13px]" style={{ color: 'var(--text-muted)' }}>
+            The {inv.line_count} {inv.line_count === 1 ? 'freight' : 'freights'} on it go back to{' '}
+            <strong>Completed</strong> and will be picked up by the next invoice you generate.
+            The draft itself is not kept.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setConfirmDiscard(false)}>
+              Keep it
+            </Button>
+            <Button
+              variant="danger"
+              loading={discard.isPending}
+              onClick={() => discard.mutate()}
+            >
+              Discard draft
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

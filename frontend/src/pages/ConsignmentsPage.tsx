@@ -357,21 +357,11 @@ function ConsignmentForm({
           </Field>
         </div>
 
-        <Field label="Customer" hint="This bill's delivery point">
-          <Select
-            value={form.consignee_id}
-            onChange={(e) => setForm({ ...form, consignee_id: e.target.value })}
-            required
-          >
-            <option value="">Select</option>
-            {consignees.data?.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-                {c.city ? ` · ${c.city}` : ''}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <QuickCustomer
+          value={form.consignee_id}
+          onChange={(id) => setForm({ ...form, consignee_id: id })}
+          customers={consignees.data ?? []}
+        />
 
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Vendor bill number">
@@ -437,5 +427,139 @@ function ConsignmentForm({
         </div>
       </form>
     </Modal>
+  )
+}
+
+/* Pick a customer, or add one without leaving the form.
+
+   Bills arrive from the vendor with whatever consignee is on them, and a new
+   dealer turns up for the first time often enough that stopping to go to
+   Customers, fill the full form with its map, come back, and start the bill
+   again is the slowest part of a morning's data entry.
+
+   Only a name is actually required for a customer, so that is all this asks
+   for — plus the city, because two dealers with the same surname are told
+   apart by the town and the pick list is otherwise a guessing game. The
+   address, the pin on the map and the phone for the tracking link get filled
+   in later under Customers; the bill is not blocked on them. */
+function QuickCustomer({
+  value,
+  onChange,
+  customers,
+}: {
+  value: string
+  onChange: (id: string) => void
+  customers: Consignee[]
+}) {
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [city, setCity] = useState('')
+  const [phone, setPhone] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const create = useCreate<Record<string, unknown>, Consignee>('/consignees', {
+    onSuccess: (created) => {
+      // Select what was just created, so the bill carries on where it was.
+      onChange(created.id)
+      setAdding(false)
+      setName('')
+      setCity('')
+      setPhone('')
+    },
+  })
+
+  if (!adding) {
+    // The label row is built by hand rather than with <Field>, because Field
+    // wraps everything in a <label> and a button inside a label also activates
+    // the control it labels.
+    return (
+      <div className="block">
+        <div className="mb-1.5 flex items-baseline justify-between gap-3">
+          <span className="text-[13px] font-medium" style={{ color: 'var(--text-muted)' }}>
+            Customer
+          </span>
+          <button
+            type="button"
+            className="text-[12px] underline underline-offset-2"
+            style={{ color: 'var(--accent)' }}
+            onClick={() => setAdding(true)}
+          >
+            New customer
+          </button>
+        </div>
+        <Select value={value} onChange={(e) => onChange(e.target.value)} required>
+          <option value="">Select</option>
+          {customers.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+              {c.city ? ` · ${c.city}` : ''}
+            </option>
+          ))}
+        </Select>
+        <span className="mt-1.5 block text-[12px]" style={{ color: 'var(--text-faint)' }}>
+          This bill&rsquo;s delivery point
+        </span>
+      </div>
+    )
+  }
+
+  function save() {
+    setError(null)
+    if (name.trim().length < 2) {
+      setError('A name is needed.')
+      return
+    }
+    create.mutate(
+      {
+        name: name.trim(),
+        city: city.trim() || null,
+        phone: phone.trim() || null,
+        type: 'RETAIL_CUSTOMER',
+      },
+      { onError: (err) => setError(apiErrorMessage(err)) },
+    )
+  }
+
+  return (
+    <div className="inset space-y-3 rounded-[var(--radius-card)] p-3">
+      <div className="flex items-center justify-between">
+        <span className="eyebrow">New customer</span>
+        <button
+          type="button"
+          className="text-[12px] underline underline-offset-2"
+          style={{ color: 'var(--text-muted)' }}
+          onClick={() => {
+            setAdding(false)
+            setError(null)
+          }}
+        >
+          Pick an existing one instead
+        </button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label="Name">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Anand Agencies" />
+        </Field>
+        <Field label="City">
+          <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Kannur" />
+        </Field>
+        <Field label="Mobile" hint="For the tracking link">
+          <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </Field>
+      </div>
+
+      <ErrorNote>{error}</ErrorNote>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px]" style={{ color: 'var(--text-faint)' }}>
+          The address and the map pin can be added later under Customers.
+        </p>
+        {/* Not a submit button: this form is nested inside the consignment
+            form, and submitting would try to create the bill instead. */}
+        <Button type="button" size="sm" loading={create.isPending} onClick={save}>
+          Add and use
+        </Button>
+      </div>
+    </div>
   )
 }
