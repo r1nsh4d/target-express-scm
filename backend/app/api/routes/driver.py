@@ -22,6 +22,7 @@ from app.models.enums import (
 from app.models.consignment import Box, Consignment
 from app.models.expense import TripExpense
 from app.models.fleet import Driver
+from app.models.tracking import VehiclePing
 from app.models.freight import Freight, FreightLeg, FreightPoint
 from app.models.settlement import Advance, FreightPayout
 from app.models.user import User
@@ -306,6 +307,91 @@ def start_trip(
     if freight.status in (FreightStatus.PLANNED, FreightStatus.LOADING):
         freight.status = FreightStatus.DISPATCHED
         freight.dispatched_at = leg.started_at
+    db.commit()
+
+
+class PingIn(BaseModel):
+    latitude: Decimal = Field(ge=-90, le=90)
+    longitude: Decimal = Field(ge=-180, le=180)
+    accuracy_m: int | None = None
+    speed_kmph: Decimal | None = None
+    # When the phone recorded it, which is not when it arrived. A lorry on the
+    # Kasaragod road loses signal for twenty minutes at a time, and the points
+    # it collected in that gap are the interesting ones.
+    recorded_at: datetime | None = None
+
+
+class PingBatchIn(BaseModel):
+    # A batch, not a single point, because the phone buffers while it has no
+    # signal and sends the backlog when it gets one. One request per point
+    # would mean fifty requests the moment a bar appears, on a connection that
+    # has just proved it is poor.
+    pings: list[PingIn] = Field(min_length=1, max_length=500)
+
+
+@router.post("/legs/{leg_id}/pings", status_code=status.HTTP_204_NO_CONTENT)
+def record_pings(
+    leg_id: str,
+    payload: PingBatchIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.DRIVER)),
+) -> None:
+    """Where the lorry is, from the driver's phone.
+
+    This is what the customer's tracking page has always been able to draw and
+    has never had anything to draw — the map could show a vehicle, and nothing
+    in the application ever wrote one.
+
+    Accepted only while the leg is actually running. A phone left on in a yard
+    overnight would otherwise keep reporting a position long after the trip
+    closed, and a customer opening an old link would watch a vehicle sitting
+    somewhere it has no reason to be.
+
+    Points outside Kerala and its neighbours are dropped rather than stored. A
+    phone with a poor fix occasionally reports the middle of the ocean, and one
+    such point drawn on a customer's map destroys the credibility of every
+    other point on it.
+    """
+    leg = db.get(FreightLeg, leg_id)
+    if leg is None:
+        raise HTTPException(status_code=404, detail="Leg not found")
+
+    driver = _driver_for(db, user)
+    if leg.driver_id != driver.id:
+        raise HTTPException(status_code=403, detail="This trip is not assigned to you")
+
+    if leg.started_at is None or leg.ended_at is not None:
+        # Not an error the driver can act on, and his phone will keep trying.
+        # Accepting and discarding is kinder than a failure he cannot clear.
+        return
+
+    now = datetime.now()
+    for ping in payload.pings:
+        # Roughly peninsular India. Wide enough for any real trip out of
+        # Kochi, narrow enough to catch a bad fix.
+        if not (Decimal("6") <= ping.latitude <= Decimal("21")):
+            continue
+        if not (Decimal("68") <= ping.longitude <= Decimal("82")):
+            continue
+
+        recorded = ping.recorded_at or now
+        # A clock set wrong on a cheap phone should not place a point in next
+        # week, where it would sort above every genuine one.
+        if recorded > now:
+            recorded = now
+
+        db.add(
+            VehiclePing(
+                freight_id=leg.freight_id,
+                leg_id=leg.id,
+                latitude=ping.latitude,
+                longitude=ping.longitude,
+                accuracy_m=ping.accuracy_m,
+                speed_kmph=ping.speed_kmph,
+                recorded_at=recorded,
+            )
+        )
+
     db.commit()
 
 

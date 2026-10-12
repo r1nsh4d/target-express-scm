@@ -34,6 +34,7 @@ import {
 } from '@/components/ui'
 import { EditTripModal, OverrideStatusModal } from '@/components/TripEditModals'
 import { api, apiErrorMessage } from '@/lib/api'
+import { BRAND } from '@/lib/brand'
 import type { Driver, Freight, FreightLeg, FreightPoint, Quote, Vehicle } from '@/lib/resources'
 import { STATUS_TONE, rupees, useAction, useItem, useList } from '@/lib/resources'
 
@@ -315,7 +316,12 @@ export default function TripDetailPage() {
                   ) : null}
                   {p.tracking_url ? (
                     <>
-                      <TrackingLink url={p.tracking_url} />
+                      <TrackingLink
+                        url={p.tracking_url}
+                        phone={p.phone}
+                        consignee={p.consignee_name}
+                        tripNo={t.trip_no}
+                      />
                       {p.tracking_expires_at ? (
                         <p className="mt-0.5 text-[11px]" style={{ color: 'var(--text-faint)' }}>
                           Works until {p.tracking_expires_at.slice(0, 10)}
@@ -571,26 +577,93 @@ function QuoteRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function TrackingLink({ url }: { url: string }) {
+/* Getting the tracking link to the customer.
+ *
+ * Copying it was the only option, which meant somebody then had to open
+ * WhatsApp, find the customer and paste it — and in practice that is the step
+ * that does not happen, so the link sits unused and the customer rings the
+ * office instead.
+ *
+ * Send opens WhatsApp with the message already written and the customer's
+ * number already filled in. No gateway, no API key, no per-message cost and
+ * nothing to configure: it is a URL. For an operator this size that is the
+ * right trade — a Business API account costs money and takes weeks of
+ * verification to do a job a tap can do today.
+ *
+ * Without a mobile number there is nobody to send to, so it offers the copy
+ * alone and says why. */
+function TrackingLink({
+  url,
+  phone,
+  consignee,
+  tripNo,
+}: {
+  url: string
+  phone?: string | null
+  consignee?: string
+  tripNo?: string
+}) {
   const [copied, setCopied] = useState(false)
+
+  function copy() {
+    navigator.clipboard?.writeText(url).then(
+      () => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      },
+      () => undefined,
+    )
+  }
+
+  // wa.me wants digits only, with the country code. Indian mobiles are stored
+  // as ten digits here, so 91 is prefixed when it is not already there.
+  const digits = (phone ?? '').replace(/\D/g, '')
+  const waNumber = digits.length === 10 ? `91${digits}` : digits
+  // Built from explicit line breaks rather than a multi-line template: a
+  // reformat would fold this file's indentation into the message the
+  // customer receives.
+  const message = encodeURIComponent(
+    [
+      BRAND.name,
+      '',
+      `Your delivery${tripNo ? ` (${tripNo})` : ''} is on the way. You can follow it here:`,
+      url,
+      '',
+      'This link works for three days.',
+    ].join('\n'),
+  )
+
   return (
-    <button
-      type="button"
-      onClick={() => {
-        navigator.clipboard?.writeText(url).then(
-          () => {
-            setCopied(true)
-            setTimeout(() => setCopied(false), 1500)
-          },
-          () => undefined,
-        )
-      }}
-      className="mt-1.5 inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] transition-colors hover:bg-[var(--surface-hover)]"
-      style={{ color: 'var(--accent)' }}
-    >
-      {copied ? <Copy className="size-3" /> : <Link2 className="size-3" />}
-      {copied ? 'Link copied' : 'Copy tracking link'}
-    </button>
+    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+      {waNumber.length >= 11 ? (
+        <a
+          href={`https://wa.me/${waNumber}?text=${message}`}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] no-underline transition-colors hover:bg-[var(--surface-hover)]"
+          style={{ color: 'var(--success)' }}
+        >
+          <Send className="size-3" />
+          Send on WhatsApp
+        </a>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={copy}
+        className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] transition-colors hover:bg-[var(--surface-hover)]"
+        style={{ color: 'var(--accent)' }}
+      >
+        {copied ? <Copy className="size-3" /> : <Link2 className="size-3" />}
+        {copied ? 'Link copied' : 'Copy link'}
+      </button>
+
+      {waNumber.length < 11 ? (
+        <span className="text-[11px]" style={{ color: 'var(--text-faint)' }}>
+          · no mobile number on file for {consignee ?? 'this customer'}
+        </span>
+      ) : null}
+    </div>
   )
 }
 

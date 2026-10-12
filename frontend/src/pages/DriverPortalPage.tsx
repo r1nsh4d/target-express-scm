@@ -14,7 +14,7 @@ import {
   Route as RouteIcon,
   Wallet,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import {
   Badge,
@@ -31,6 +31,7 @@ import { PhotoInput } from '@/components/PhotoInput'
 import { ScanBoxesSheet } from '@/components/ScanBoxesSheet'
 import { multiStopMapsUrl, singleStopMapsUrl } from '@/lib/maps'
 import { api, apiErrorMessage } from '@/lib/api'
+import { trackLeg } from '@/lib/pings'
 import { useAuth } from '@/lib/auth'
 import { STATUS_TONE, rupees } from '@/lib/resources'
 
@@ -279,6 +280,19 @@ function FreightDetail({ id, onBack }: { id: string; onBack: () => void }) {
     queryClient.invalidateQueries({ queryKey: ['driver-freight', id] })
     queryClient.invalidateQueries({ queryKey: ['driver-freights'] })
   }
+
+  /* Send the lorry's position while the trip is open.
+     Starts when the opening odometer is in and stops at the closing one, so a
+     phone left on in a yard overnight is not still reporting. The fixes are
+     buffered on the phone and flushed when there is a signal — a lorry on the
+     Kasaragod road loses it for twenty minutes at a time, and those are the
+     interesting minutes. */
+  const legId = trip?.leg_id
+  const running = !!legId && trip?.start_odometer !== null && trip?.end_odometer === null
+  useEffect(() => {
+    if (!running || !legId) return
+    return trackLeg(legId)
+  }, [running, legId])
 
   const start = useMutation({
     mutationFn: ({ reading, photo }: { reading: number; photo: string | null }) =>
