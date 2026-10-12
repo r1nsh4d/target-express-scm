@@ -13,6 +13,7 @@
 #   bash deploy/backend.sh bootstrap     create the 3 logins and one vehicle
 #   bash deploy/backend.sh seed          load the full Godrej demo data
 #   bash deploy/backend.sh demo          seed + everything that hangs off it
+#   bash deploy/backend.sh clear         delete the records, KEEP the setup
 #   bash deploy/backend.sh routes        list every endpoint
 #   bash deploy/backend.sh storage       check object storage is reachable
 #   bash deploy/backend.sh users         who can sign in, and with what role
@@ -162,6 +163,33 @@ case "${1:-}" in
     require_module app.demo
     dc exec -T api python -m app.seed
     dc exec -T api python -m app.demo
+    ;;
+
+  clear)
+    # The one people actually want after a demo.
+    #
+    # `db.sh reset` empties everything, which means re-entering every vendor,
+    # division, warehouse, rate card, customer, vehicle and driver — most of a
+    # day's work, and the part nobody wants to do twice. This clears the
+    # records and leaves the setup.
+    bold "Clearing the day-to-day records"
+    require_module app.clear
+
+    warn "This deletes freights, bills, boxes, invoices, settlements, expenses,"
+    warn "advances, returns, tracking links and enquiries."
+    warn "It KEEPS vendors, rate cards, customers, vehicles, drivers and logins."
+    echo
+
+    # What is about to go, before anything is asked.
+    dc exec -T api python -m app.clear --dry-run
+
+    echo
+    bold "Backing up first — clearing without one is just data loss"
+    bash "$(dirname "${BASH_SOURCE[0]}")/db.sh" backup
+
+    confirm_destructive "DELETE every freight, bill, box, invoice and settlement"
+    dc exec -T api python -m app.clear --yes
+    ok "done — the setup is intact, so you can start entering real work"
     ;;
 
   routes)
