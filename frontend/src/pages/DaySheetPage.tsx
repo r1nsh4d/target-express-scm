@@ -1,37 +1,35 @@
 import { useMutation } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, Check, CircleAlert, Sparkles, Wand2 } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  CircleAlert,
+  Sparkles,
+  Trash2,
+  Wand2,
+} from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import {
-  Button,
-  Card,
-  ErrorNote,
-  Field,
-  Input,
-  PageHeader,
-  Select,
-  Spinner,
-  Textarea,
-} from '@/components/ui'
+import { Button, Card, ErrorNote, Input, Select, Spinner, Textarea } from '@/components/ui'
 import { api, apiErrorMessage } from '@/lib/api'
 import type { Consignee, VendorDivision, Warehouse } from '@/lib/resources'
 import { useList } from '@/lib/resources'
 
 /* The whole morning on one screen.
-
-   Entering a day used to be: a dialog per bill, then a separate screen to
-   build the freight, then a third pass attaching each bill to its stop. Thirty
-   bills is thirty round trips and the attaching step is the one people miss —
-   which is how a sorting sheet ends up full of zeroes with nothing to print.
-
-   Here it is one textarea, one review, one button. The reading is done on the
-   server by rules and fuzzy matching: no API key, no cost per line, no
-   internet needed, and no customer's name leaves the machine. It is not a
-   language model and does not pretend to be. What it will not do is guess
-   quietly — every line says what it understood, and anything doubtful waits
-   for a person, because a wrong customer on a bill is a carton delivered to
-   the wrong town. */
+ *
+ * Entering a day used to be a dialog per bill, then a separate screen to build
+ * the freight, then a third pass attaching each bill to its stop. Here it is
+ * one textarea, one review, one button.
+ *
+ * The layout earns its keep as much as the parsing does. The first version
+ * stacked each understood bill as its own card with its own set of field
+ * labels, so three bills filled the screen and the Create button sat below the
+ * fold — which, on a screen whose whole promise is "enter thirty bills
+ * quickly", is the wrong shape. Now: what you type on the left, what was
+ * understood on the right, labels written once, one line per bill, and the
+ * action pinned to the bottom where it can always be reached.
+ */
 
 interface Match {
   consignee_id: string | null
@@ -59,14 +57,14 @@ interface ParseOut {
   needs_attention: number
 }
 
-/* A person's corrections to what was read. Kept apart from the parse result so
-   that retyping a line does not silently throw away a customer somebody has
-   already confirmed. */
+/* A person's corrections, kept apart from the parse result so that retyping a
+   line does not throw away a customer somebody has already confirmed. */
 interface Override {
   consignee_id?: string | null
   newCustomerName?: string
   box_count?: number
   vendor_bill_no?: string
+  dropped?: boolean
 }
 
 const EXAMPLE = `GDJ/8870 Rinshad Km 6
@@ -97,6 +95,13 @@ export default function DaySheetPage() {
     !!vendorId,
   )
 
+  // Only one warehouse for this vendor? Then there is nothing to choose, and
+  // asking is one more thing standing between a stack of bills and a freight.
+  useEffect(() => {
+    const only = warehouses.data
+    if (only?.length === 1 && !warehouseId) setWarehouseId(only[0].id)
+  }, [warehouses.data, warehouseId])
+
   const doParse = useMutation({
     mutationFn: async (body: { text: string; vendor_division_id: string | null }) =>
       (await api.post<ParseOut>('/daysheet/parse', body)).data,
@@ -104,8 +109,7 @@ export default function DaySheetPage() {
   })
 
   /* Read as you type, but not on every keystroke. 400ms is long enough that a
-     line being typed is not parsed half-finished and short enough that it feels
-     like the screen is keeping up. */
+     half-typed line is not parsed and short enough to feel immediate. */
   useEffect(() => {
     if (!text.trim()) {
       setParsed(null)
@@ -118,49 +122,50 @@ export default function DaySheetPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, divisionId])
 
-  /* What each line will actually create, once a person's corrections are laid
-     over what was read. */
   const rows = useMemo(() => {
     if (!parsed) return []
-    return parsed.lines.map((line) => {
-      const o = overrides[line.line_no] ?? {}
-      const consigneeId =
-        o.consignee_id !== undefined ? o.consignee_id : (line.match?.consignee_id ?? null)
-      const name =
-        consigneeId
-          ? (consignees.data?.find((c) => c.id === consigneeId)?.name ?? line.match?.name ?? '')
+    return parsed.lines
+      .map((line) => {
+        const o = overrides[line.line_no] ?? {}
+        const consigneeId =
+          o.consignee_id !== undefined ? o.consignee_id : (line.match?.consignee_id ?? null)
+        const name = consigneeId
+          ? (consignees.data?.find((c) => c.id === consigneeId)?.name ??
+            line.match?.name ??
+            '')
           : (o.newCustomerName ?? line.customer_text)
 
-      const billNo = o.vendor_bill_no ?? line.vendor_bill_no ?? ''
-      const boxes = o.box_count ?? line.box_count ?? 0
+        const billNo = o.vendor_bill_no ?? line.vendor_bill_no ?? ''
+        const boxes = o.box_count ?? line.box_count ?? 0
 
-      const blockers: string[] = []
-      if (!billNo) blockers.push('needs a bill number')
-      if (!boxes || boxes < 1) blockers.push('needs a box count')
-      if (!consigneeId && !o.newCustomerName) blockers.push('needs a customer')
+        const blockers: string[] = []
+        if (!billNo) blockers.push('a bill number')
+        if (!boxes || boxes < 1) blockers.push('a box count')
+        if (!consigneeId && !o.newCustomerName) blockers.push('a customer')
 
-      return { line, consigneeId, name, billNo, boxes, blockers, o }
-    })
+        return { line, consigneeId, name, billNo, boxes, blockers, o }
+      })
+      .filter((r) => !r.o.dropped)
   }, [parsed, overrides, consignees.data])
 
   const ready = rows.length > 0 && rows.every((r) => r.blockers.length === 0)
   const totalBoxes = rows.reduce((sum, r) => sum + r.boxes, 0)
+  const needLook = rows.filter((r) => r.blockers.length).length
 
-  /* The stops, in the order they will be delivered. One per customer however
-     many bills they have — the vendor is charged per point, so splitting a
-     customer's two bills into two stops would overcharge them and the invoice
-     would be queried. */
   const stops = useMemo(() => {
     const byCustomer = new Map<string, { name: string; bills: number; boxes: number }>()
     for (const r of rows) {
-      if (!r.consigneeId) continue
-      const current = byCustomer.get(r.consigneeId) ?? { name: r.name, bills: 0, boxes: 0 }
+      const key = r.consigneeId ?? `new:${r.name.toLowerCase()}`
+      const current = byCustomer.get(key) ?? { name: r.name, bills: 0, boxes: 0 }
       current.bills += 1
       current.boxes += r.boxes
-      byCustomer.set(r.consigneeId, current)
+      byCustomer.set(key, current)
     }
     const ids = [...byCustomer.keys()]
-    const ordered = [...order.filter((id) => ids.includes(id)), ...ids.filter((id) => !order.includes(id))]
+    const ordered = [
+      ...order.filter((id) => ids.includes(id)),
+      ...ids.filter((id) => !order.includes(id)),
+    ]
     return ordered.map((id) => ({ id, ...byCustomer.get(id)! }))
   }, [rows, order])
 
@@ -179,25 +184,22 @@ export default function DaySheetPage() {
   const commit = useMutation({
     mutationFn: async () =>
       (
-        await api.post<{ freight_id: string | null; trip_no: string | null }>(
-          '/daysheet/commit',
-          {
-            vendor_division_id: divisionId,
-            warehouse_id: warehouseId,
-            trip_date: tripDate,
-            create_freight: makeFreight,
-            stop_order: stops.map((s) => s.id),
-            rows: rows.map((r) => ({
-              vendor_bill_no: r.billNo,
-              box_count: r.boxes,
-              item_name: r.line.item_name,
-              consignee_id: r.consigneeId,
-              new_customer: r.consigneeId
-                ? null
-                : { name: r.o.newCustomerName ?? r.line.customer_text },
-            })),
-          },
-        )
+        await api.post<{ freight_id: string | null }>('/daysheet/commit', {
+          vendor_division_id: divisionId,
+          warehouse_id: warehouseId,
+          trip_date: tripDate,
+          create_freight: makeFreight,
+          stop_order: stops.map((s) => s.id).filter((id) => !id.startsWith('new:')),
+          rows: rows.map((r) => ({
+            vendor_bill_no: r.billNo,
+            box_count: r.boxes,
+            item_name: r.line.item_name,
+            consignee_id: r.consigneeId,
+            new_customer: r.consigneeId
+              ? null
+              : { name: r.o.newCustomerName ?? r.line.customer_text },
+          })),
+        })
       ).data,
     onSuccess: (result) => {
       setText('')
@@ -209,14 +211,15 @@ export default function DaySheetPage() {
     onError: (e) => setError(apiErrorMessage(e)),
   })
 
-  const canCommit = ready && !!divisionId && !!warehouseId
+  const missingSetup = !divisionId || !warehouseId
+  const canCommit = ready && !missingSetup
 
   return (
-    <div className="space-y-6">
-      <PageHeader description="Type or paste the day's bills, one per line. They are read here — bill number, customer, box count — and the bills, the boxes, the freight and its stops are all created in one action." />
-
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Field label="Vendor division">
+    /* Room at the bottom for the pinned action bar, so the last row is never
+       hidden behind it. */
+    <div className="space-y-5">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Compact label="Vendor division">
           <Select
             value={divisionId}
             onChange={(e) => {
@@ -231,8 +234,8 @@ export default function DaySheetPage() {
               </option>
             ))}
           </Select>
-        </Field>
-        <Field label="Loading warehouse">
+        </Compact>
+        <Compact label="Loading warehouse">
           <Select
             value={warehouseId}
             onChange={(e) => setWarehouseId(e.target.value)}
@@ -245,185 +248,249 @@ export default function DaySheetPage() {
               </option>
             ))}
           </Select>
-        </Field>
-        <Field label="Date">
+        </Compact>
+        <Compact label="Date">
           <Input type="date" value={tripDate} onChange={(e) => setTripDate(e.target.value)} />
-        </Field>
+        </Compact>
       </div>
 
-      <div>
-        <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
-          <span className="text-[13px] font-medium" style={{ color: 'var(--text-muted)' }}>
-            The day&rsquo;s bills
-          </span>
-          {!text ? (
-            <button
-              type="button"
-              className="text-[12px] underline underline-offset-2"
-              style={{ color: 'var(--accent)' }}
-              onClick={() => setText(EXAMPLE)}
-            >
-              Show me an example
-            </button>
-          ) : null}
-        </div>
-        <Textarea
-          rows={8}
-          className="font-mono text-[13px]"
-          placeholder={`One bill per line, in any order:\n\n${EXAMPLE}`}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <p className="mt-1.5 text-[12px]" style={{ color: 'var(--text-faint)' }}>
-          <Wand2 className="mr-1 inline size-3" />
-          Bill number, customer and box count, in whatever order they come out. Misspelt customer
-          names are matched to the list; a tab- or comma-separated paste out of a spreadsheet works
-          too.
-        </p>
-      </div>
-
-      {doParse.isPending && !parsed ? (
-        <div className="flex justify-center py-8">
-          <Spinner className="size-5" />
-        </div>
-      ) : null}
-
-      {parsed && rows.length ? (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="eyebrow">
-              {rows.length} bill{rows.length === 1 ? '' : 's'} · {totalBoxes} boxes ·{' '}
-              {stops.length} stop{stops.length === 1 ? '' : 's'}
-            </h2>
-            {ready ? (
-              <span
-                className="inline-flex items-center gap-1 text-[12.5px]"
-                style={{ color: 'var(--success)' }}
+      {/* What you type, and what it became, side by side — so the translation
+          is visible rather than something that happens further down a page. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+        <div className="lg:sticky lg:top-4 lg:self-start">
+          <div className="mb-1.5 flex items-baseline justify-between gap-2">
+            <span className="text-[13px] font-medium" style={{ color: 'var(--text-muted)' }}>
+              Type the day&rsquo;s bills
+            </span>
+            {!text ? (
+              <button
+                type="button"
+                className="text-[12px] underline underline-offset-2"
+                style={{ color: 'var(--accent)' }}
+                onClick={() => setText(EXAMPLE)}
               >
-                <Check className="size-3.5" /> All read
-              </span>
-            ) : (
-              <span
-                className="inline-flex items-center gap-1 text-[12.5px]"
-                style={{ color: 'var(--warning)' }}
-              >
-                <CircleAlert className="size-3.5" />
-                {rows.filter((r) => r.blockers.length).length} need a look
-              </span>
-            )}
+                Show an example
+              </button>
+            ) : null}
           </div>
+          <Textarea
+            rows={14}
+            className="font-mono text-[13px] leading-relaxed"
+            placeholder={`One bill per line:\n\n${EXAMPLE}`}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            spellCheck={false}
+          />
+          <p className="mt-2 text-[12px] leading-relaxed" style={{ color: 'var(--text-faint)' }}>
+            <Wand2 className="mr-1 inline size-3" />
+            Bill number, customer and box count, in any order. Misspelt names are matched to the
+            list, and a paste out of a spreadsheet works.
+          </p>
+        </div>
 
-          <div className="space-y-2">
-            {rows.map((r) => (
-              <LineRow
-                key={r.line.line_no}
-                row={r}
-                customers={consignees.data ?? []}
-                onSet={(patch) => set(r.line.line_no, patch)}
-              />
-            ))}
-          </div>
-
-          {makeFreight && stops.length ? (
-            <Card className="p-4">
-              <h3 className="text-[14px] font-semibold">Stops, in delivery order</h3>
-              <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                One stop per customer, however many bills they have — the vendor is charged per
-                point, not per bill.
-              </p>
-              <div className="mt-3 space-y-1.5">
-                {stops.map((s, i) => (
-                  <div
-                    key={s.id}
-                    className="flex items-center gap-3 rounded-lg border px-3 py-2"
-                    style={{ borderColor: 'var(--border)', background: 'var(--bg-elevated)' }}
-                  >
-                    <span
-                      className="tnum grid size-6 shrink-0 place-items-center rounded-md text-[12px] font-semibold"
-                      style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}
-                    >
-                      {i + 1}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-[13px]">{s.name}</span>
-                    <span className="tnum text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                      {s.bills} bill{s.bills === 1 ? '' : 's'} · {s.boxes} boxes
-                    </span>
-                    <div className="flex shrink-0 gap-1">
-                      <button
-                        type="button"
-                        className="rounded p-1 hover:bg-[var(--surface-hover)] disabled:opacity-30"
-                        disabled={i === 0}
-                        onClick={() => move(i, -1)}
-                        aria-label={`Move ${s.name} earlier`}
-                      >
-                        <ArrowUp className="size-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded p-1 hover:bg-[var(--surface-hover)] disabled:opacity-30"
-                        disabled={i === stops.length - 1}
-                        onClick={() => move(i, 1)}
-                        aria-label={`Move ${s.name} later`}
-                      >
-                        <ArrowDown className="size-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+        <div className="min-w-0">
+          {doParse.isPending && !parsed ? (
+            <div className="flex justify-center py-12">
+              <Spinner className="size-5" />
+            </div>
+          ) : !parsed || !rows.length ? (
+            <Card className="flex min-h-[14rem] items-center justify-center p-6 text-center">
+              <div>
+                <Wand2 className="mx-auto mb-2 size-6" style={{ color: 'var(--text-faint)' }} />
+                <p className="text-[13.5px] font-medium">Nothing read yet</p>
+                <p className="mt-1 text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+                  What you type on the left appears here, bill by bill, before anything is
+                  created.
+                </p>
               </div>
             </Card>
-          ) : null}
+          ) : (
+            <div className="space-y-2">
+              {/* Labels once, not on every row. */}
+              <div
+                className="grid items-center gap-2 px-2 text-[11px] tracking-[0.1em] uppercase sm:grid-cols-[7.5rem_minmax(0,1fr)_4rem_2rem]"
+                style={{ color: 'var(--text-faint)' }}
+              >
+                <span>Bill no</span>
+                <span className="hidden sm:block">Customer</span>
+                <span className="hidden text-right sm:block">Boxes</span>
+                <span />
+              </div>
 
-          <label className="flex items-center gap-2.5 text-[13px]">
-            <input
-              type="checkbox"
-              className="size-4 accent-[var(--accent)]"
-              checked={makeFreight}
-              onChange={(e) => setMakeFreight(e.target.checked)}
-            />
-            <span>
-              Build the freight as well
-              <span className="block text-[12px]" style={{ color: 'var(--text-faint)' }}>
-                Leave this off to enter the bills now and decide the lorry later.
+              {rows.map((r) => (
+                <LineRow
+                  key={r.line.line_no}
+                  row={r}
+                  customers={consignees.data ?? []}
+                  onSet={(patch) => set(r.line.line_no, patch)}
+                />
+              ))}
+
+              {makeFreight && stops.length ? (
+                <Card className="mt-4 p-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 className="text-[13.5px] font-semibold">Stops, in delivery order</h3>
+                    <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                      One per customer — the vendor is charged per stop, not per bill
+                    </p>
+                  </div>
+                  <div className="mt-2.5 space-y-1.5">
+                    {stops.map((s, i) => (
+                      <div
+                        key={s.id}
+                        className="flex items-center gap-3 rounded-lg px-3 py-1.5"
+                        style={{ background: 'var(--bg-elevated)' }}
+                      >
+                        <span
+                          className="tnum grid size-5 shrink-0 place-items-center rounded text-[11px] font-semibold"
+                          style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}
+                        >
+                          {i + 1}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[13px]">{s.name}</span>
+                        <span className="tnum text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                          {s.bills}&nbsp;bill{s.bills === 1 ? '' : 's'} · {s.boxes}&nbsp;boxes
+                        </span>
+                        <div className="flex shrink-0">
+                          <IconBtn
+                            label={`Move ${s.name} earlier`}
+                            disabled={i === 0}
+                            onClick={() => move(i, -1)}
+                          >
+                            <ArrowUp className="size-3.5" />
+                          </IconBtn>
+                          <IconBtn
+                            label={`Move ${s.name} later`}
+                            disabled={i === stops.length - 1}
+                            onClick={() => move(i, 1)}
+                          >
+                            <ArrowDown className="size-3.5" />
+                          </IconBtn>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              ) : null}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Pinned, so the count and the button are reachable from anywhere in a
+          sheet of forty lines without scrolling to the end to find out what it
+          adds up to. */}
+      {rows.length ? (
+        /* Sticky, not fixed. The content area is scaled by the text-size
+           setting, and a `fixed` box inside a scaled ancestor is laid out in
+           the scaled coordinate space — at the largest setting it would stop
+           short of the right-hand edge. Sticky stays in normal flow and is
+           unaffected. */
+        <div
+          className="sticky bottom-0 z-20 -mx-1 rounded-t-[var(--radius-card)] border-t backdrop-blur-md"
+          style={{
+            borderColor: 'var(--border)',
+            background: 'color-mix(in oklab, var(--surface-solid) 92%, transparent)',
+          }}
+        >
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              {ready ? (
+                <Check className="size-4 shrink-0" style={{ color: 'var(--success)' }} />
+              ) : (
+                <CircleAlert className="size-4 shrink-0" style={{ color: 'var(--warning)' }} />
+              )}
+              <span className="tnum text-[13.5px] font-medium">
+                {rows.length} bill{rows.length === 1 ? '' : 's'} · {totalBoxes} boxes
+                {makeFreight ? ` · ${stops.length} stop${stops.length === 1 ? '' : 's'}` : ''}
               </span>
-            </span>
-          </label>
+            </div>
 
-          <ErrorNote>{error}</ErrorNote>
+            <label className="flex items-center gap-2 text-[12.5px]">
+              <input
+                type="checkbox"
+                className="size-4 accent-[var(--accent)]"
+                checked={makeFreight}
+                onChange={(e) => setMakeFreight(e.target.checked)}
+              />
+              Build the freight too
+            </label>
 
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
-              {!divisionId || !warehouseId
-                ? 'Pick the vendor division and warehouse above.'
-                : ready
-                  ? 'Nothing is created until you press this.'
-                  : 'Fix the lines marked above first.'}
-            </p>
-            <Button
-              icon={<Sparkles className="size-4" />}
-              disabled={!canCommit}
-              loading={commit.isPending}
-              onClick={() => {
-                setError(null)
-                commit.mutate()
-              }}
-            >
-              {makeFreight
-                ? `Create ${rows.length} bill${rows.length === 1 ? '' : 's'} + freight`
-                : `Create ${rows.length} bill${rows.length === 1 ? '' : 's'}`}
-            </Button>
+            <div className="ms-auto flex items-center gap-3">
+              <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                {missingSetup
+                  ? 'Pick the division and warehouse above'
+                  : needLook
+                    ? `${needLook} line${needLook === 1 ? '' : 's'} need a look`
+                    : 'Nothing is created until you press this'}
+              </span>
+              <Button
+                icon={<Sparkles className="size-4" />}
+                disabled={!canCommit}
+                loading={commit.isPending}
+                onClick={() => {
+                  setError(null)
+                  commit.mutate()
+                }}
+              >
+                {makeFreight ? 'Create bills + freight' : 'Create bills'}
+              </Button>
+            </div>
           </div>
-        </>
+          {error ? (
+            <div className="px-4 pb-3">
+              <ErrorNote>{error}</ErrorNote>
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   )
 }
 
-/* One line, as it was read, with every piece correctable in place.
+function Compact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[12px]" style={{ color: 'var(--text-muted)' }}>
+        {label}
+      </span>
+      {children}
+    </label>
+  )
+}
 
-   The confidence is shown rather than hidden. A match at 100% needs no
-   thought; one at 71% is exactly the case where somebody should look, and
-   saying so is cheaper than a carton going to the wrong town. */
+function IconBtn({
+  children,
+  label,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode
+  label: string
+  disabled?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className="rounded p-1 hover:bg-[var(--surface-hover)] disabled:opacity-25"
+      style={{ color: 'var(--text-muted)' }}
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={label}
+    >
+      {children}
+    </button>
+  )
+}
+
+/* One bill, on one line.
+ *
+ * Everything is editable in place, with no labels repeated — the header above
+ * says what the columns are, once. The raw text and the match confidence only
+ * appear when the match was not certain: on a clean sheet of thirty bills,
+ * thirty copies of "matched 100%" is noise that hides the one line that needs
+ * a person. */
 function LineRow({
   row,
   customers,
@@ -443,111 +510,97 @@ function LineRow({
 }) {
   const { line, consigneeId, billNo, boxes, blockers } = row
   const unsure = !!line.match?.consignee_id && line.match.score < 0.86
+  const isNew = !consigneeId
   const needsLook = blockers.length > 0
 
   return (
     <div
-      className="rounded-lg border p-3"
+      className="rounded-[10px] border px-2 py-2"
       style={{
         borderColor: needsLook
-          ? 'color-mix(in oklab, var(--warning) 40%, transparent)'
+          ? 'color-mix(in oklab, var(--warning) 45%, transparent)'
           : 'var(--border)',
-        background: 'var(--bg-elevated)',
+        background: needsLook
+          ? 'color-mix(in oklab, var(--warning) 6%, var(--surface))'
+          : 'var(--surface)',
       }}
     >
-      <div className="grid gap-3 sm:grid-cols-[9rem_1fr_5rem]">
-        <div>
-          <span className="mb-1 block text-[11px]" style={{ color: 'var(--text-faint)' }}>
-            Bill no
-          </span>
-          <Input
-            value={billNo}
-            placeholder="GDJ/8870"
-            onChange={(e) => onSet({ vendor_bill_no: e.target.value })}
-          />
-        </div>
+      <div className="grid items-center gap-2 sm:grid-cols-[7.5rem_minmax(0,1fr)_4rem_2rem]">
+        <Input
+          value={billNo}
+          placeholder="GDJ/8870"
+          className="font-mono text-[12.5px]"
+          onChange={(e) => onSet({ vendor_bill_no: e.target.value })}
+        />
 
-        <div>
-          <span className="mb-1 block text-[11px]" style={{ color: 'var(--text-faint)' }}>
-            Customer
-          </span>
-          <Select
-            value={consigneeId ?? '__new__'}
-            onChange={(e) =>
-              onSet(
-                e.target.value === '__new__'
-                  ? { consignee_id: null, newCustomerName: row.name }
-                  : { consignee_id: e.target.value },
-              )
-            }
-          >
-            <option value="__new__">
-              + Create &ldquo;{row.o.newCustomerName ?? line.customer_text}&rdquo;
+        <Select
+          value={consigneeId ?? '__new__'}
+          onChange={(e) =>
+            onSet(
+              e.target.value === '__new__'
+                ? { consignee_id: null, newCustomerName: row.name }
+                : { consignee_id: e.target.value },
+            )
+          }
+        >
+          <option value="__new__">
+            + New customer: {row.o.newCustomerName ?? (line.customer_text || '—')}
+          </option>
+          {customers.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+              {c.city ? ` · ${c.city}` : ''}
             </option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-                {c.city ? ` · ${c.city}` : ''}
-              </option>
-            ))}
-          </Select>
-        </div>
-
-        <div>
-          <span className="mb-1 block text-[11px]" style={{ color: 'var(--text-faint)' }}>
-            Boxes
-          </span>
-          <Input
-            className="tnum"
-            type="number"
-            min={1}
-            value={boxes || ''}
-            onChange={(e) => onSet({ box_count: Number(e.target.value) || 0 })}
-          />
-        </div>
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px]">
-        <span className="font-mono" style={{ color: 'var(--text-faint)' }}>
-          {line.raw}
-        </span>
-        {line.item_name ? (
-          <span style={{ color: 'var(--text-muted)' }}>· {line.item_name}</span>
-        ) : null}
-        {consigneeId && line.match ? (
-          <span
-            style={{
-              color: unsure ? 'var(--warning)' : 'var(--text-faint)',
-            }}
-          >
-            · matched {Math.round(line.match.score * 100)}%
-          </span>
-        ) : null}
-      </div>
-
-      {/* The runners-up, offered only when the top match was not confident.
-          "Did you mean" is of no use without them. */}
-      {unsure && line.match?.alternatives.length ? (
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px]">
-          <span style={{ color: 'var(--text-muted)' }}>Or:</span>
-          {line.match.alternatives.map((alt) => (
-            <button
-              key={alt.id}
-              type="button"
-              className="rounded-full px-2.5 py-0.5 underline underline-offset-2"
-              style={{ color: 'var(--accent)' }}
-              onClick={() => onSet({ consignee_id: alt.id })}
-            >
-              {alt.name}
-            </button>
           ))}
-        </div>
-      ) : null}
+        </Select>
 
-      {needsLook ? (
-        <p className="mt-2 text-[12px]" style={{ color: 'var(--warning)' }}>
-          This line {blockers.join(', ')}.
-        </p>
+        <Input
+          className="tnum text-center"
+          type="number"
+          min={1}
+          value={boxes || ''}
+          onChange={(e) => onSet({ box_count: Number(e.target.value) || 0 })}
+          aria-label="Boxes"
+        />
+
+        <IconBtn label={`Remove ${billNo || 'this line'}`} onClick={() => onSet({ dropped: true })}>
+          <Trash2 className="size-3.5" />
+        </IconBtn>
+      </div>
+
+      {/* Only when it is worth saying. */}
+      {needsLook || unsure || isNew || line.item_name ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[11.5px]">
+          {needsLook ? (
+            <span style={{ color: 'var(--warning)' }}>
+              Needs {blockers.join(' and ')} — typed “{line.raw}”
+            </span>
+          ) : null}
+          {isNew && !needsLook ? (
+            <span style={{ color: 'var(--accent)' }}>Will be created as a new customer</span>
+          ) : null}
+          {unsure && !needsLook ? (
+            <span style={{ color: 'var(--warning)' }}>
+              Matched {Math.round((line.match?.score ?? 0) * 100)}% — check this
+            </span>
+          ) : null}
+          {line.item_name ? (
+            <span style={{ color: 'var(--text-faint)' }}>{line.item_name}</span>
+          ) : null}
+          {unsure
+            ? line.match?.alternatives.map((alt) => (
+                <button
+                  key={alt.id}
+                  type="button"
+                  className="underline underline-offset-2"
+                  style={{ color: 'var(--accent)' }}
+                  onClick={() => onSet({ consignee_id: alt.id })}
+                >
+                  {alt.name}?
+                </button>
+              ))
+            : null}
+        </div>
       ) : null}
     </div>
   )
