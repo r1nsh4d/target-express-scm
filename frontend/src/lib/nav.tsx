@@ -25,6 +25,7 @@ import {
   Truck,
   UserRound,
   Users,
+  Wand2,
   Wallet,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -72,6 +73,7 @@ export const NAV_GROUPS: Record<number, string> = {
 export const NAV: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', blurb: "Today's operations at a glance", icon: <LayoutDashboard className={ICON} />, roles: ALL_BACK_OFFICE, group: 1, keywords: 'home overview summary' },
   { to: '/freights', label: 'Freights', blurb: 'Delivery runs — one warehouse out, many points, back again', icon: <Route className={ICON} />, roles: ALL_BACK_OFFICE, group: 1, keywords: 'trips runs lr dispatch' },
+  { to: '/day-sheet', label: 'Day sheet', blurb: "Type the day's bills and create everything in one go", icon: <Wand2 className={ICON} />, roles: OPS, group: 1, keywords: 'bulk entry paste quick add morning import smart' },
   { to: '/consignments', label: 'Consignments', blurb: 'Vendor bills and the boxes against them', icon: <Package className={ICON} />, roles: OPS, group: 1, keywords: 'bills boxes inward' },
   { to: '/route-presets', label: 'Saved routes', blurb: 'The rounds you already run — pick one and the whole trip is filled in', icon: <Bookmark className={ICON} />, roles: OPS, group: 1, keywords: 'presets rounds no 11 template recurring' },
   { to: '/labels', label: 'Sorting & labels', blurb: 'Sort boxes by point and print the stickers', icon: <ScanBarcode className={ICON} />, roles: OPS, group: 1, keywords: 'print stickers barcode sort' },

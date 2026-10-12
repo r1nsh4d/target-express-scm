@@ -8,6 +8,7 @@ from app.api.routes import (
     company,
     consignments,
     dashboard,
+    daysheet,
     driver,
     expenses,
     freights,
@@ -47,6 +48,7 @@ app.include_router(presets.router)
 # working alongside the freight lifecycle routes.
 app.include_router(freights.router)
 app.include_router(consignments.router)
+app.include_router(daysheet.router)
 app.include_router(billing.router)
 app.include_router(company.router)
 app.include_router(expenses.router)

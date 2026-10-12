@@ -10,6 +10,7 @@ import AdvancesPage from '@/pages/AdvancesPage'
 import ConsignmentsPage from '@/pages/ConsignmentsPage'
 import ExpensesPage from '@/pages/ExpensesPage'
 import GuidePage from '@/pages/GuidePage'
+import DaySheetPage from '@/pages/DaySheetPage'
 import InvoicesPage from '@/pages/InvoicesPage'
 import MoneyInPage from '@/pages/MoneyInPage'
 import LabelsPage from '@/pages/LabelsPage'
@@ -109,6 +110,7 @@ export default function App() {
         <Route path="labels" element={<LabelsPage />} />
         <Route path="route-presets" element={<RoutePresetsPage />} />
         <Route path="market-vehicles" element={<MarketVehiclesPage />} />
+        <Route path="day-sheet" element={<DaySheetPage />} />
         <Route path="invoices" element={<InvoicesPage />} />
         <Route path="money-in" element={<MoneyInPage />} />
         <Route path="settlements" element={<SettlementsPage />} />

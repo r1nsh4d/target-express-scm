@@ -12,6 +12,7 @@ import {
   Truck,
   UserRound,
   Users,
+  Wand2,
   Warehouse,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -126,6 +127,21 @@ const SETUP: Step[] = [
 const RUN: Step[] = [
   {
     n: '08',
+    icon: <Wand2 className="size-4" />,
+    title: 'The fast way: the Day sheet',
+    to: '/day-sheet',
+    who: 'office',
+    why: 'Steps 09 to 12 below are the long way round, one dialog at a time. The Day sheet does the same work in one screen — and it cannot skip attaching the bills to the stops, which is the step most often missed.',
+    todo: [
+      'Type or paste the day’s bills, one per line: bill number, customer, box count, in any order.',
+      'It reads them and matches the customer names — “Kannur DC” and “kozikode srvce” both find the right branch.',
+      'Check the lines it marks. A name it does not recognise is offered as a new customer rather than forced onto the nearest one.',
+      'Put the stops in delivery order, and press create. The bills, the boxes, the freight and its stops all appear together, ready to label.',
+    ],
+    watch: 'No internet and no AI service is involved — the reading happens on your own server, so it costs nothing per line and no customer name leaves the machine. Nothing is created until you press the button.',
+  },
+  {
+    n: '09',
     icon: <Package className="size-4" />,
     title: 'Enter the day’s bills',
     to: '/consignments',
@@ -140,7 +156,7 @@ const RUN: Step[] = [
     watch: 'Bills come before the freight. The freight screen can only attach bills that already exist.',
   },
   {
-    n: '09',
+    n: '10',
     icon: <Route className="size-4" />,
     title: 'Build the freight',
     to: '/freights',
@@ -154,7 +170,7 @@ const RUN: Step[] = [
     ],
   },
   {
-    n: '10',
+    n: '11',
     icon: <Truck className="size-4" />,
     title: 'Attach the bills to each stop',
     to: '/freights',
@@ -168,7 +184,7 @@ const RUN: Step[] = [
     watch: 'Until the bills are attached there are no boxes, so there is nothing to label and nothing to deliver.',
   },
   {
-    n: '11',
+    n: '12',
     icon: <ScanBarcode className="size-4" />,
     title: 'Print and paste the stickers',
     to: '/labels',
@@ -182,7 +198,7 @@ const RUN: Step[] = [
     watch: 'Print only after the bills are attached. Before that the sticker has no point number and no colour, and sorts to nowhere.',
   },
   {
-    n: '12',
+    n: '13',
     icon: <Package className="size-4" />,
     title: 'Confirm loading, then dispatch',
     to: '/freights',
@@ -195,7 +211,7 @@ const RUN: Step[] = [
     watch: 'A tracking link works for three days. If a delivery slips past that, issue a new one from the stop on the freight screen.',
   },
   {
-    n: '13',
+    n: '14',
     icon: <Smartphone className="size-4" />,
     title: 'The driver runs the trip',
     who: 'driver',
@@ -210,7 +226,7 @@ const RUN: Step[] = [
     watch: 'Nothing is forced. A carton that cannot take a sticker is still delivered — the count can be typed instead of scanned.',
   },
   {
-    n: '14',
+    n: '15',
     icon: <ReceiptIndianRupee className="size-4" />,
     title: 'Bill the vendor',
     to: '/invoices',
@@ -225,7 +241,7 @@ const RUN: Step[] = [
     watch: 'A freight reaches BILLED because an invoice exists, never by hand. Once an invoice is issued it can only be cancelled, because the number has gone to the vendor and a gap in the series is what an auditor asks about.',
   },
   {
-    n: '15',
+    n: '16',
     icon: <Landmark className="size-4" />,
     title: 'Record the payment, and settle',
     to: '/money-in',
