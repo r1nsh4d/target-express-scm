@@ -149,7 +149,9 @@ export default function TripDetailPage() {
           {/* The hand override. Last in the row and quiet, because it is the
               exception: the normal path through these states records evidence
               at each step and this one records only a sentence. */}
-          {!['BILLED', 'SETTLED'].includes(t.status) ? (
+          {/* Cancelled is the end of the line — nothing follows it, so there is
+              nothing to offer. The replacement is a new trip. */}
+          {!['BILLED', 'SETTLED', 'CANCELLED'].includes(t.status) ? (
             <Button
               variant="ghost"
               icon={<GitBranch className="size-4" />}

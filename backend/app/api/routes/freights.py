@@ -1013,6 +1013,31 @@ OVERRIDABLE = (
     FreightStatus.CANCELLED,
 )
 
+# The life of a freight, in order. A status may be moved FORWARD along this
+# line and never back.
+#
+# Backwards was allowed and should not have been. A trip that has been
+# dispatched has an LR number out of a vehicle's book and tracking links in
+# customers' hands; one that is completed has odometer readings and payouts
+# behind it. Dragging either back to PLANNED leaves all of that pointing at a
+# trip that, as far as the system is now concerned, has not happened — and
+# nothing in the record says it ever did.
+#
+# The escape hatch is CANCELLED, which is reachable from anywhere short of an
+# invoice. A trip entered wrongly is cancelled and entered again: the wrong one
+# stays visible, with its reason, instead of being quietly rewritten into the
+# right one.
+PROGRESSION = (
+    FreightStatus.DRAFT,
+    FreightStatus.PLANNED,
+    FreightStatus.LOADING,
+    FreightStatus.DISPATCHED,
+    FreightStatus.IN_TRANSIT,
+    FreightStatus.COMPLETED,
+    FreightStatus.BILLED,
+    FreightStatus.SETTLED,
+)
+
 
 @router.post("/{freight_id}/status", response_model=FreightOut)
 def override_status(
@@ -1041,6 +1066,33 @@ def override_status(
                 "invoice or recording a settlement."
             ),
         )
+
+    # Forward only. CANCELLED is the exception and the escape hatch: it is not a
+    # step on the line, it is the end of one.
+    if payload.status != FreightStatus.CANCELLED:
+        if freight.status == FreightStatus.CANCELLED:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This trip was cancelled. A cancelled trip is not restarted — "
+                    "create a new one, so the cancelled trip stays on the record with "
+                    "its reason."
+                ),
+            )
+        here = PROGRESSION.index(freight.status)
+        there = PROGRESSION.index(payload.status)
+        if there < here:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This trip is already {freight.status.replace('_', ' ').lower()}, "
+                    f"and cannot go back to {payload.status.replace('_', ' ').lower()}. "
+                    "Statuses only move forward, so that an LR number, a tracking link "
+                    "or a payout can never end up attached to a trip the system says "
+                    "has not happened. If it was entered wrongly, cancel it and create "
+                    "a new one."
+                ),
+            )
 
     if freight.status in (FreightStatus.BILLED, FreightStatus.SETTLED):
         raise HTTPException(

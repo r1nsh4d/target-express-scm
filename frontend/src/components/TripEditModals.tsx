@@ -294,15 +294,31 @@ export function EditTripModal({
 /* BILLED and SETTLED are absent on purpose: those follow from an invoice and a
    settlement existing, and a trip marked BILLED with no invoice behind it is a
    hole in the accounts. */
-const OVERRIDABLE_STATUSES = [
+/* The life of a trip, in order. A status moves forward along this line and
+   never back — a dispatched trip has an LR number out of a vehicle's book and
+   tracking links in customers' hands, and dragging it back to Planned leaves
+   those pointing at a trip the system says has not happened.
+
+   The server enforces this. The list is here as well so that a backward step
+   is never OFFERED: being shown a choice and then refused it is worse than not
+   being shown it. */
+const PROGRESSION = [
   'DRAFT',
   'PLANNED',
   'LOADING',
   'DISPATCHED',
   'IN_TRANSIT',
   'COMPLETED',
-  'CANCELLED',
 ] as const
+
+function reachableFrom(current: string): string[] {
+  // Cancelled is the end of the line, not a step on it. Nothing follows.
+  if (current === 'CANCELLED') return []
+  const here = PROGRESSION.indexOf(current as (typeof PROGRESSION)[number])
+  const forward = here < 0 ? [...PROGRESSION] : PROGRESSION.slice(here + 1)
+  // Cancelling is always available: it is the way out of a trip entered wrongly.
+  return [...forward, 'CANCELLED']
+}
 
 /** Move a trip's status by hand.
  *
@@ -365,7 +381,7 @@ export function OverrideStatusModal({
         <Field label="Move it to">
           <Select value={status} onChange={(e) => setStatus(e.target.value)} required>
             <option value="">Select</option>
-            {OVERRIDABLE_STATUSES.filter((s) => s !== trip.status).map((s) => (
+            {reachableFrom(trip.status).map((s) => (
               <option key={s} value={s}>
                 {s.replace('_', ' ')}
               </option>
