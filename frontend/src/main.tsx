@@ -6,11 +6,13 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './index.css'
 import { AuthProvider } from './lib/auth'
+import { initTextSize } from './lib/textsize'
 import { initTheme } from './lib/theme'
 
 // Apply the stored theme before the first paint, so there is no flash of the
 // wrong palette on reload.
 initTheme()
+initTextSize()
 
 const queryClient = new QueryClient({
   defaultOptions: {

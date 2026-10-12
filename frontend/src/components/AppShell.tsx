@@ -3,6 +3,7 @@ import {
   KeyRound,
   LogOut,
   Menu,
+  ALargeSmall,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -23,6 +24,7 @@ import { ROLE_LABELS, useAuth } from '@/lib/auth'
 import type { NavItem } from '@/lib/nav'
 import { currentNav, navFor } from '@/lib/nav'
 import { toggleTheme, useTheme } from '@/lib/theme'
+import { TEXT_SIZE_LABELS, setTextSize, useTextSize } from '@/lib/textsize'
 
 const COLLAPSE_KEY = 'tx.rail.collapsed'
 
@@ -225,6 +227,7 @@ function Rail({
 function AccountMenu() {
   const { user, logout } = useAuth()
   const theme = useTheme()
+  const textSize = useTextSize()
   const [open, setOpen] = useState(false)
   const [changing, setChanging] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -245,6 +248,30 @@ function AccountMenu() {
 
   return (
     <div className="flex items-center gap-2" ref={ref}>
+      {/* Type size, beside the light switch and for the same reason: the person
+          reading this is not the person who chose the type. A clerk in their
+          fifties reading a bill number, and a driver checking a stop in a cab
+          at night, are not served by sizes picked on a large bright monitor —
+          and no single size suits a 24-inch desk and a cracked phone at once.
+          So it is handed over rather than guessed at. */}
+      <button
+        onClick={() =>
+          setTextSize(
+            textSize === 'normal' ? 'large' : textSize === 'large' ? 'larger' : 'normal',
+          )
+        }
+        className="grid size-9 place-items-center rounded-full transition-[box-shadow] active:[box-shadow:var(--neu-pressed)]"
+        style={{
+          background: textSize === 'normal' ? 'var(--surface)' : 'var(--accent-dim)',
+          color: textSize === 'normal' ? 'var(--text-muted)' : 'var(--accent)',
+          boxShadow: 'var(--neu-raised-sm)',
+        }}
+        title={`Text size: ${TEXT_SIZE_LABELS[textSize]}`}
+        aria-label={`Text size: ${TEXT_SIZE_LABELS[textSize]}. Click for the next size.`}
+      >
+        <ALargeSmall className="size-4" />
+      </button>
+
       <button
         onClick={toggleTheme}
         className="grid size-9 place-items-center rounded-full transition-[box-shadow] active:[box-shadow:var(--neu-pressed)]"

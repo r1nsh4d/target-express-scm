@@ -13,6 +13,7 @@ import {
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
+import { NextSteps } from '@/components/NextSteps'
 import { Badge, Card, EmptyState } from '@/components/ui'
 import { api } from '@/lib/api'
 import { stagger, useCountUp } from '@/lib/motion'
@@ -254,6 +255,11 @@ export default function DashboardPage() {
           year: 'numeric',
         })}
       </p>
+
+      {/* First on the page, deliberately. Somebody opening this at 7am needs
+          to know what to do before they need to know how the month is going,
+          and the counts below are a report rather than an instruction. */}
+      <NextSteps limit={4} />
 
       {earnings.data ? <Money data={earnings.data} /> : null}
 

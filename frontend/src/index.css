@@ -548,6 +548,40 @@
     }
   }
 
+  /* --- how big everything is ---------------------------------------------- */
+
+  /* Scale rather than font-size, because the type scale here is in pixels and
+     a larger root font would move none of it. Scaling moves the text, the
+     padding, the icons and the tap targets together, which is what somebody
+     asking for "bigger" actually means.
+
+     Applied to the content only. The navigation rail is sized to fit its items
+     exactly, and scaling it would push the last few off the bottom of the
+     screen — which would make the application harder to use for precisely the
+     person who asked for larger text. */
+  main {
+    zoom: var(--tx-scale, 1);
+  }
+
+  /* `zoom` scales a fixed overlay's contents but not the window it is measured
+     against, so a dialog at the largest setting could otherwise run past the
+     bottom of the screen with its buttons out of reach. Dividing the height
+     budget by the scale keeps it inside. */
+  :root[data-text-size='large'] [role='dialog'],
+  :root[data-text-size='larger'] [role='dialog'] {
+    zoom: var(--tx-scale, 1);
+    max-height: calc((100dvh - 4rem) / var(--tx-scale, 1)) !important;
+  }
+
+  /* Paper has its own size. A sticker scaled to 125% no longer fits the label,
+     and an invoice stops matching the printed one it reproduces. */
+  @media print {
+    main,
+    [role='dialog'] {
+      zoom: 1 !important;
+    }
+  }
+
   /* --- print ------------------------------------------------------------- */
 
   /* On paper only the stickers matter: the navigation, the top bar and the

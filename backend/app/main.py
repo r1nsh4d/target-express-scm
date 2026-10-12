@@ -14,6 +14,7 @@ from app.api.routes import (
     freights,
     masters,
     masters_edit,
+    nextsteps,
     presets,
     public,
     reports,
@@ -54,6 +55,7 @@ app.include_router(daysheet.router)
 app.include_router(billing.router)
 app.include_router(returns.router)
 app.include_router(reports.router)
+app.include_router(nextsteps.router)
 app.include_router(company.router)
 app.include_router(expenses.router)
 app.include_router(uploads.router)
