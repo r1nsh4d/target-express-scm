@@ -255,3 +255,86 @@ def test_reissuing_needs_a_login(client, dispatched):
         f"/api/freights/{dispatched['freight']}/points/{dispatched['point']}/tracking-link"
     )
     assert res.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# What Postgres actually returns
+# ---------------------------------------------------------------------------
+
+
+def test_the_freight_detail_survives_a_timezone_aware_expiry(client, dispatched, auth):
+    """The bug this guards against listed a freight perfectly and then said
+    "Trip not found" when you opened it.
+
+    Postgres stores these columns as timestamptz and psycopg returns them
+    timezone-AWARE. `datetime.now()` is naive, and Python raises TypeError
+    rather than comparing them — a 500 on the detail page. SQLite has no
+    timestamptz and returns naive, so the whole suite passed while the live
+    system was broken.
+
+    So the aware value is forced in here rather than waited for.
+    """
+    from datetime import timezone as _tz
+
+    from app.db.session import SessionLocal
+    from app.models.tracking import TrackingSession
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    session = db.execute(
+        select(TrackingSession).where(TrackingSession.token == dispatched["token"])
+    ).scalar_one()
+    # Exactly what psycopg hands back for a timestamptz column.
+    session.expires_at = datetime.now(_tz.utc) + timedelta(days=3)
+    db.commit()
+    db.close()
+
+    res = client.get(f"/api/freights/{dispatched['freight']}", headers=auth)
+    assert res.status_code == 200, (
+        "the freight detail failed on a timezone-aware expiry — this is the "
+        f"bug that showed as 'Trip not found': {res.text[:300]}"
+    )
+    assert res.json()["points"][0]["tracking_url"], "a live link was not offered"
+
+
+def test_the_customer_page_survives_a_timezone_aware_expiry(client, dispatched, auth):
+    """Same fault, older, and worse: it would have refused every valid link."""
+    from datetime import timezone as _tz
+
+    from app.db.session import SessionLocal
+    from app.models.tracking import TrackingSession
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    session = db.execute(
+        select(TrackingSession).where(TrackingSession.token == dispatched["token"])
+    ).scalar_one()
+    session.expires_at = datetime.now(_tz.utc) + timedelta(days=3)
+    db.commit()
+    db.close()
+
+    res = client.get(f"/api/track/{dispatched['token']}")
+    assert res.status_code == 200, f"a live link was refused: {res.text[:300]}"
+
+
+def test_an_aware_expiry_in_the_past_is_still_refused(client, dispatched, auth):
+    """The fix must not make everything valid."""
+    from datetime import timezone as _tz
+
+    from app.db.session import SessionLocal
+    from app.models.tracking import TrackingSession
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    session = db.execute(
+        select(TrackingSession).where(TrackingSession.token == dispatched["token"])
+    ).scalar_one()
+    session.expires_at = datetime.now(_tz.utc) - timedelta(hours=1)
+    db.commit()
+    db.close()
+
+    assert client.get(f"/api/track/{dispatched['token']}").status_code == 404
+
+    point = client.get(f"/api/freights/{dispatched['freight']}", headers=auth).json()["points"][0]
+    assert point["tracking_url"] is None
+    assert point["tracking_expired"] is True

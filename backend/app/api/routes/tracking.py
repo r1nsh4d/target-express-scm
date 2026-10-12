@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.clock import has_passed
 from app.db.session import get_db
 from app.models.consignment import Consignment
 from app.models.enums import FreightPointStatus, FreightStatus, LocationChangeStatus
@@ -98,7 +99,7 @@ def _session(db: Session, token: str) -> TrackingSession:
 
     # One message for every failure mode: a wrong token must not be
     # distinguishable from an expired one.
-    if session is None or not session.is_active or session.expires_at < datetime.now():
+    if session is None or not session.is_active or has_passed(session.expires_at):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="This tracking link is no longer active.",

@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import BACK_OFFICE_ROLES, WAREHOUSE_ROLES, require_roles
+from app.core.clock import is_future
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.audit import AuditLog, OdometerCorrection
@@ -231,12 +232,16 @@ def _point_out(point: FreightPoint, include_tracking: bool = False) -> PointOut:
         # only is_active meant the screen went on offering a link for days
         # after it had expired: the customer opened it and was told to contact
         # the sender, and the sender was looking at a link that appeared fine.
-        now = datetime.now()
+        # is_future rather than a bare `>` against datetime.now(): Postgres
+        # hands these back timezone-aware and datetime.now() is naive, which
+        # Python refuses to compare. That raised a 500 on the freight detail —
+        # a trip that listed fine and then said "Trip not found" — and the
+        # tests never saw it because SQLite returns naive for the same column.
         session = next(
             (
                 s
                 for s in getattr(point, "_tracking_sessions", [])
-                if s.is_active and s.expires_at > now
+                if s.is_active and is_future(s.expires_at)
             ),
             None,
         )
