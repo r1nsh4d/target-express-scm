@@ -4,6 +4,7 @@ import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react
 import { forwardRef, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 
+import { BRAND } from '@/lib/brand'
 import { stagger } from '@/lib/motion'
 import { useTheme } from '@/lib/theme'
 
@@ -598,7 +599,7 @@ export function Logo({
     return (
       <img
         src={candidates[attempt]}
-        alt="Target Express"
+        alt={BRAND.name}
         style={{ height: size }}
         className="w-auto max-w-full object-contain"
         onError={() => {
@@ -644,7 +645,7 @@ export function Logo({
           className="truncate text-[13px] font-semibold italic tracking-[0.055em] uppercase"
           style={{ color: ink }}
         >
-          Target Express
+          {BRAND.name}
         </span>
         {/* The full tagline. Tracking is tighter than the name above it so the
             longer line still fits the rail without truncating. */}
@@ -652,7 +653,7 @@ export function Logo({
           className="mt-[3px] truncate text-[8px] tracking-[0.145em] uppercase"
           style={{ color: sub }}
         >
-          Logistics to connect world
+          {BRAND.tagline}
         </span>
       </span>
     </span>

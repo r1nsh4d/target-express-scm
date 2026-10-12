@@ -631,8 +631,14 @@ class UnloadingItemRateIn(BaseModel):
     vendor_division_id: str
     item_code: str = Field(min_length=1, max_length=48)
     item_name: str = Field(min_length=1, max_length=160)
+    # What the vendor is charged.
     base_rate: Decimal
     per_floor_rate: Decimal = Decimal("0")
+    # What the driver is paid for the same article. The difference is Target
+    # Express's margin on unloading. Zero on both means this division pays its
+    # drivers a percentage instead.
+    driver_base_rate: Decimal = Decimal("0")
+    driver_per_floor_rate: Decimal = Decimal("0")
     charge_floors_with_lift: bool = False
     max_chargeable_floors: int = 0
     effective_from: date

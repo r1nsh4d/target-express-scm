@@ -40,12 +40,16 @@ class Settings(BaseSettings):
     # recoverable; a professional-looking invoice with no GSTIN on it goes to
     # the vendor and comes back.
     # ------------------------------------------------------------------ #
-    company_name: str = ""
-    company_address: str = ""
-    company_gstin: str = ""
-    company_pan: str = ""
-    company_phone: str = ""
-    company_email: str = ""
+    # Defaults are Target Express's own, read off their letterhead, so a fresh
+    # install prints a correct tax invoice without anybody editing a file. Every
+    # one is still overridable from .env.prod, which is what a different
+    # operator running this software would do.
+    company_name: str = "TARGET EXPRESS"
+    company_address: str = "6/857 A, Sky Tower, HMT Jn., Kalamassery - 683 104"
+    company_gstin: str = "32CFZPR0727R1ZH"
+    company_pan: str = "CFZPR0727R"
+    company_phone: str = "7012036002"
+    company_email: str = "targetexpress1997@gmail.com"
     # The state the business is registered in. Decides CGST+SGST (same state)
     # versus IGST (different state) — getting this wrong puts the tax under the
     # wrong heads and the vendor cannot claim it.

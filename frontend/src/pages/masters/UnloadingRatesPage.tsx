@@ -28,6 +28,8 @@ interface ItemRate {
   item_name: string
   base_rate: string
   per_floor_rate: string
+  driver_base_rate: string
+  driver_per_floor_rate: string
   charge_floors_with_lift: boolean
   max_chargeable_floors: number
   effective_from: string
@@ -118,14 +120,38 @@ export default function UnloadingRatesPage() {
                 render: (r) => <span className="tnum">{rupees(r.per_floor_rate)}</span>,
               },
               {
-                key: 'example',
-                header: '4th floor',
+                key: 'driver',
+                header: 'Driver is paid',
                 align: 'right',
-                render: (r) => (
-                  <span className="tnum font-medium">
-                    {rupees(Number(r.base_rate) + 4 * Number(r.per_floor_rate))}
-                  </span>
-                ),
+                render: (r) =>
+                  Number(r.driver_base_rate) > 0 ? (
+                    <span className="tnum">{rupees(r.driver_base_rate)}</span>
+                  ) : (
+                    <span className="text-[12px]" style={{ color: 'var(--text-faint)' }}>
+                      on a %
+                    </span>
+                  ),
+              },
+              {
+                /* The number the business actually runs on. Shown beside the
+                   two it comes from, so a rate raised on one side and not the
+                   other is visible on the same row rather than discovered in a
+                   settlement three weeks later. */
+                key: 'margin',
+                header: 'Margin',
+                align: 'right',
+                render: (r) => {
+                  if (Number(r.driver_base_rate) <= 0) return <span style={{ color: 'var(--text-faint)' }}>—</span>
+                  const margin = Number(r.base_rate) - Number(r.driver_base_rate)
+                  return (
+                    <span
+                      className="tnum font-medium"
+                      style={{ color: margin > 0 ? 'var(--success)' : 'var(--danger)' }}
+                    >
+                      {rupees(margin)}
+                    </span>
+                  )
+                },
               },
               {
                 key: 'lift',
@@ -205,6 +231,8 @@ function RateForm({
     item_code: '',
     base_rate: '',
     per_floor_rate: '',
+    driver_base_rate: '',
+    driver_per_floor_rate: '',
     charge_floors_with_lift: false,
     max_chargeable_floors: '0',
     effective_from: new Date().toISOString().slice(0, 10),
@@ -221,13 +249,16 @@ function RateForm({
 
   const base = Number(form.base_rate) || 0
   const perFloor = Number(form.per_floor_rate) || 0
+  const driverBase = Number(form.driver_base_rate) || 0
+  const driverPerFloor = Number(form.driver_per_floor_rate) || 0
+  const fourthMargin = base + 4 * perFloor - (driverBase + 4 * driverPerFloor)
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       title="New article rate"
-      description="What unloading one of these costs, on the ground and per floor above it."
+      description="Two prices for the same article: what the vendor is charged, and what the driver is paid for carrying it. The difference is what Target Express keeps."
     >
       <form
         className="space-y-4"
@@ -241,6 +272,10 @@ function RateForm({
                 form.item_code.trim().toUpperCase().replace(/\s+/g, '_') ||
                 form.item_name.trim().toUpperCase().replace(/\s+/g, '_'),
               max_chargeable_floors: Number(form.max_chargeable_floors) || 0,
+              // Blank means "no driver rate on this article", which is 0, not
+              // an empty string the server cannot read as a number.
+              driver_base_rate: driverBase,
+              driver_per_floor_rate: driverPerFloor,
             },
             { onError: (err) => setError(apiErrorMessage(err)) },
           )
@@ -305,13 +340,78 @@ function RateForm({
           </Field>
         </div>
 
+        <div>
+          <p className="eyebrow mb-2">What the driver is paid</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Ground-floor pay" hint="Leave at 0 to pay a percentage instead">
+              <Input
+                className="tnum"
+                type="number"
+                step="0.01"
+                min={0}
+                value={form.driver_base_rate}
+                onChange={(e) => setForm({ ...form, driver_base_rate: e.target.value })}
+                placeholder="30"
+              />
+            </Field>
+            <Field label="Per floor above ground">
+              <Input
+                className="tnum"
+                type="number"
+                step="0.01"
+                min={0}
+                value={form.driver_per_floor_rate}
+                onChange={(e) => setForm({ ...form, driver_per_floor_rate: e.target.value })}
+                placeholder="6"
+              />
+            </Field>
+          </div>
+        </div>
+
+        {/* Both sides worked through on one example, because the margin is the
+            reason the company handles unloading at all — and a rate raised on
+            the vendor side without the driver side is how it quietly
+            disappears. */}
         {base > 0 ? (
-          <p className="inset px-3.5 py-2.5 text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
-            One to the 4th floor bills{' '}
-            <span className="tnum font-medium" style={{ color: 'var(--text)' }}>
-              {rupees(base)} + 4 × {rupees(perFloor)} = {rupees(base + 4 * perFloor)}
-            </span>
-          </p>
+          <div className="inset space-y-1.5 px-3.5 py-3 text-[12.5px]">
+            <div className="flex items-baseline justify-between">
+              <span style={{ color: 'var(--text-muted)' }}>Vendor is charged, 4th floor</span>
+              <span className="tnum" style={{ color: 'var(--text)' }}>
+                {rupees(base)} + 4 × {rupees(perFloor)} = {rupees(base + 4 * perFloor)}
+              </span>
+            </div>
+            {driverBase > 0 ? (
+              <>
+                <div className="flex items-baseline justify-between">
+                  <span style={{ color: 'var(--text-muted)' }}>Driver is paid</span>
+                  <span className="tnum" style={{ color: 'var(--text)' }}>
+                    {rupees(driverBase)} + 4 × {rupees(driverPerFloor)} ={' '}
+                    {rupees(driverBase + 4 * driverPerFloor)}
+                  </span>
+                </div>
+                <div className="groove my-1" />
+                <div className="flex items-baseline justify-between">
+                  <span className="font-medium">Target Express keeps</span>
+                  <span
+                    className="tnum font-semibold"
+                    style={{ color: fourthMargin > 0 ? 'var(--success)' : 'var(--danger)' }}
+                  >
+                    {rupees(fourthMargin)}
+                  </span>
+                </div>
+                {fourthMargin <= 0 ? (
+                  <p style={{ color: 'var(--danger)' }}>
+                    The driver is paid at least what the vendor is charged. Check both figures.
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p style={{ color: 'var(--text-faint)' }}>
+                No driver rate set, so this division pays its drivers the percentage share on
+                their pay terms.
+              </p>
+            )}
+          </div>
         ) : null}
 
         <div className="grid gap-4 sm:grid-cols-2">

@@ -37,24 +37,10 @@ const MUTED = '#a2a2a8'
 const FAINT = '#6e6e76'
 const LINE = 'rgba(255,255,255,0.10)'
 const CYAN = '#22d3ee'
+import { BRAND, CONTACT, COPY } from '@/lib/brand'
+
 const GRAD = 'linear-gradient(135deg, #22d3ee 0%, #a78bfa 100%)'
 
-/* ---------------------------------------------------------------------------
-   CONTACT DETAILS — REPLACE THESE WITH THE CLIENT'S REAL ONES.
-
-   These are placeholders. I do not know Target Express's actual phone, email or
-   office address, and a landing page that publishes a wrong number is worse
-   than one that publishes none. Everything the public sees is in this one
-   object: change it here and it changes in the nav, the connect section and the
-   footer together.
---------------------------------------------------------------------------- */
-const CONTACT = {
-  phone: '+91 00000 00000',
-  phoneHref: 'tel:+910000000000',
-  whatsapp: 'https://wa.me/910000000000',
-  email: 'ops@targetexpress.in',
-  city: 'Kerala, India',
-}
 
 const SHELL = 'mx-auto w-full max-w-[1200px] px-6 sm:px-10'
 
@@ -108,9 +94,9 @@ function Wordmark({ size = 16 }: { size?: number }) {
         TE
       </span>
       <span className="flex flex-col leading-none">
-        <span className="text-[13px] font-semibold italic tracking-[0.1em]">TARGET EXPRESS</span>
+        <span className="text-[13px] font-semibold italic tracking-[0.1em]">{BRAND.name}</span>
         <span className="mt-1 text-[8.5px] tracking-[0.22em]" style={{ color: FAINT }}>
-          LOGISTICS TO CONNECT WORLD
+          {BRAND.tagline}
         </span>
       </span>
     </span>
@@ -190,7 +176,7 @@ function Hero() {
             src="/hero.jpg"
             alt=""
             /* Above the fold, so it is fetched eagerly and at high priority —
-               this is the first thing anyone sees of Target Express.
+               this is the first thing anyone sees of the company.
                object-position favours the lower half: the trucks and the lit
                dock are the subject, the sky is only the backdrop. */
             fetchPriority="high"
@@ -313,11 +299,12 @@ function Hero() {
               One run, start to finish
             </p>
             <p className="mt-6 text-[1.75rem]" style={DISPLAY}>
-              Sorted.
-              <br />
-              Sealed.
-              <br />
-              Signed for.
+              {COPY.promiseLines.map((line, i) => (
+                <span key={line}>
+                  {i > 0 ? <br /> : null}
+                  {line}
+                </span>
+              ))}
             </p>
 
             <dl className="mt-8 border-t pt-6" style={{ borderColor: 'rgba(255,255,255,0.2)' }}>
@@ -360,10 +347,10 @@ function TrackStrip() {
       <div className={`${SHELL} tx-reveal flex flex-wrap items-center gap-6 py-10`}>
         <div className="min-w-[260px] flex-1">
           <p className="text-[1.5rem]" style={DISPLAY}>
-            Expecting a delivery?
+            {COPY.trackTitle}
           </p>
           <p className="mt-2 text-[13.5px]" style={{ color: MUTED }}>
-            Enter the LR number from your paperwork. No app, no login, no password.
+            {COPY.trackSub}
           </p>
         </div>
 
@@ -843,7 +830,7 @@ function Footer(): ReactNode {
           style={{ color: FAINT }}
         >
           <span>Logistics to connect world</span>
-          <span>© {new Date().getFullYear()} Target Express Logistics</span>
+          <span>© {new Date().getFullYear()} {BRAND.legalName}</span>
         </div>
       </div>
     </footer>

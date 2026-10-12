@@ -35,6 +35,12 @@ from app.services.payout import (
     resolve_payee,
 )
 from app.services.settlement import recover_advances_for_freight
+from app.services.unloading import (
+    calculate_point_driver_pay,
+    division_pays_per_article,
+    items_from_boxes,
+    resolve_item_rates,
+)
 
 
 def _effective(stmt, model, on_date: date):
@@ -114,9 +120,28 @@ def leg_facts(db: Session, leg: FreightLeg) -> LegFacts:
     if leg.started_at and leg.ended_at:
         days = max(1, (leg.ended_at.date() - leg.started_at.date()).days + 1)
 
+    # What the driver earned on the article rates, if this division prices
+    # unloading that way. Computed from the same rate rows the vendor is
+    # charged from, so the margin on every chair is a subtraction rather than a
+    # reconciliation between two tables.
+    piece_pay: Decimal | None = None
+    freight = leg.freight
+    rates = resolve_item_rates(db, freight.vendor_division_id, freight.trip_date)
+    if division_pays_per_article(rates):
+        piece_pay = Decimal("0")
+        for point in covered:
+            pay = calculate_point_driver_pay(
+                rates,
+                items_from_boxes([b for c in point.consignments for b in c.boxes]),
+                floor_number=point.floor_number,
+                has_lift=point.has_lift,
+            )
+            piece_pay += pay.total
+
     return LegFacts(
         km=leg.leg_distance_km or 0,
         points=len(attempted),
+        unloading_piece_pay=piece_pay,
         # Both unloading numbers reach the payout, because the driver's share
         # may be a percentage of either - see UnloadingShareBasis. Only the leg's
         # own points count: on a vehicle swap the second driver is not paid for

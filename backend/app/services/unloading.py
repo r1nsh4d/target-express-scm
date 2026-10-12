@@ -38,6 +38,10 @@ class ItemRate:
     item_name: str
     base_rate: Decimal
     per_floor_rate: Decimal = Decimal("0")
+    # The driver's side of the same article. Zero means this division pays its
+    # drivers by the percentage arrangement instead.
+    driver_base_rate: Decimal = Decimal("0")
+    driver_per_floor_rate: Decimal = Decimal("0")
     charge_floors_with_lift: bool = False
     max_chargeable_floors: int = 0
 
@@ -51,8 +55,20 @@ class ItemRate:
         return floor_number
 
     def unit_charge(self, floor_number: int, has_lift: bool) -> Decimal:
+        """What the VENDOR pays for one of these, at this floor."""
         floors = self.floors_charged(floor_number, has_lift)
         return money(self.base_rate + Decimal(floors) * self.per_floor_rate)
+
+    def unit_pay(self, floor_number: int, has_lift: bool) -> Decimal:
+        """What the DRIVER is paid for carrying one of these, at this floor.
+
+        The same climb rules as the charge, deliberately. If the vendor is not
+        billed for a lift building then the driver is not paid for one either —
+        two different rules for the same staircase is how a margin turns
+        negative on the one delivery nobody checked.
+        """
+        floors = self.floors_charged(floor_number, has_lift)
+        return money(self.driver_base_rate + Decimal(floors) * self.driver_per_floor_rate)
 
 
 @dataclass(frozen=True)
@@ -178,6 +194,8 @@ def resolve_item_rates(
             item_name=row.item_name,
             base_rate=Decimal(row.base_rate),
             per_floor_rate=Decimal(row.per_floor_rate),
+            driver_base_rate=Decimal(row.driver_base_rate),
+            driver_per_floor_rate=Decimal(row.driver_per_floor_rate),
             charge_floors_with_lift=bool(row.charge_floors_with_lift),
             max_chargeable_floors=int(row.max_chargeable_floors),
         )
@@ -198,3 +216,93 @@ def items_from_boxes(boxes) -> list[UnloadItem]:
             continue
         counts[code] = counts.get(code, 0) + 1
     return [UnloadItem(item_code=code, quantity=qty) for code, qty in sorted(counts.items())]
+
+
+@dataclass
+class PointDriverPay:
+    """What the driver earns for unloading one point, article by article."""
+
+    floor_number: int
+    has_lift: bool
+    lines: list[UnloadingLine] = field(default_factory=list)
+    unpriced_item_codes: list[str] = field(default_factory=list)
+
+    @property
+    def total(self) -> Decimal:
+        return money(sum((line.amount for line in self.lines), Decimal("0")))
+
+    @property
+    def item_count(self) -> int:
+        return sum(line.quantity for line in self.lines)
+
+
+def calculate_point_driver_pay(
+    rates: dict[str, ItemRate],
+    items: list[UnloadItem],
+    *,
+    floor_number: int = 0,
+    has_lift: bool = False,
+) -> PointDriverPay:
+    """What the driver is paid for unloading this point.
+
+    The mirror of `calculate_point_unloading`, run on the driver column of the
+    same rate rows. The vendor is charged `a` for a chair and the driver is paid
+    `b`; the difference is Target Express's margin on unloading, and because
+    both numbers come off one row for one article on one date, the margin is
+    always a subtraction rather than a reconciliation between two tables.
+
+    An article with no driver rate contributes nothing and is reported, the same
+    way an unpriced article is on the charging side. Paying zero quietly for
+    work a man actually did is the failure to avoid here.
+    """
+    result = PointDriverPay(floor_number=floor_number, has_lift=has_lift)
+
+    for item in items:
+        rate = rates.get(item.item_code)
+        if rate is None or rate.driver_base_rate <= 0:
+            if item.item_code not in result.unpriced_item_codes:
+                result.unpriced_item_codes.append(item.item_code)
+            continue
+
+        floors = rate.floors_charged(floor_number, has_lift)
+        unit = rate.unit_pay(floor_number, has_lift)
+        amount = money(unit * Decimal(item.quantity))
+
+        if floors:
+            basis = (
+                f"{item.quantity} x {rate.item_name}: "
+                f"{rate.driver_base_rate} + {floors} floor(s) x "
+                f"{rate.driver_per_floor_rate} = {unit} each"
+            )
+        else:
+            basis = (
+                f"{item.quantity} x {rate.item_name}: {rate.driver_base_rate} each"
+            )
+
+        result.lines.append(
+            UnloadingLine(
+                item_code=rate.item_code,
+                item_name=rate.item_name,
+                quantity=item.quantity,
+                base_rate=money(rate.driver_base_rate),
+                floors_charged=floors,
+                per_floor_rate=money(rate.driver_per_floor_rate),
+                unit_charge=unit,
+                amount=amount,
+                basis=basis,
+            )
+        )
+
+    return result
+
+
+def division_pays_per_article(rates: dict[str, ItemRate]) -> bool:
+    """Does this division pay its drivers per article at all?
+
+    If no article carries a driver rate, the division is on the older
+    percentage-of-the-unloading arrangement and the payout should use that
+    instead. Asked explicitly rather than inferred from a zero total, because a
+    genuine zero — a point where nothing priced was carried — must not silently
+    switch a driver onto a different pay scheme.
+    """
+    return any(rate.driver_base_rate > 0 for rate in rates.values())

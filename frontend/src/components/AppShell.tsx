@@ -16,6 +16,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import CommandPalette, { openCommandPalette } from '@/components/CommandPalette'
+import { BRAND } from '@/lib/brand'
 import { Button, ErrorNote, Field, Input, Logo, Modal } from '@/components/ui'
 import { api, apiErrorMessage } from '@/lib/api'
 import { ROLE_LABELS, useAuth } from '@/lib/auth'
@@ -508,7 +509,7 @@ export default function AppShell() {
               only for whichever item the mouse happens to be over. */}
           <div className="min-w-0 flex-1">
             <p className="truncate text-[14px] font-semibold">
-              {nav?.label ?? 'Target Express'}
+              {nav?.label ?? BRAND.name}
             </p>
             {nav?.blurb ? (
               <p className="truncate text-[11.5px]" style={{ color: 'var(--text-muted)' }}>

@@ -124,8 +124,30 @@ class UnloadingItemRate(BaseModel):
     item_code: Mapped[str] = mapped_column(String(48), nullable=False, index=True)
     item_name: Mapped[str] = mapped_column(String(160), nullable=False)
 
+    # What the VENDOR is charged for this article. Target Express's income.
     base_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0, nullable=False)
     per_floor_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0, nullable=False)
+
+    # What the DRIVER is paid for carrying the same article, and the difference
+    # is Target Express's margin on unloading.
+    #
+    # Both sides live on one row deliberately. They are the same commercial
+    # decision taken twice — a chair is priced to the vendor and to the driver
+    # in the same conversation — and splitting them into two tables makes it
+    # possible to raise one and forget the other, which is how a margin
+    # silently becomes a loss. One row also means the two are versioned
+    # together, so re-pricing an old trip reproduces both figures as they stood
+    # that day.
+    #
+    # Zero is a real answer: a division whose drivers are paid a percentage
+    # rather than per article leaves these at zero and the percentage
+    # arrangement in driver_pay_terms applies instead.
+    driver_base_rate: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=0, server_default="0", nullable=False
+    )
+    driver_per_floor_rate: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=0, server_default="0", nullable=False
+    )
 
     # Charge floors even when the building has a lift. Carrying a wardrobe up
     # four flights and wheeling it into a lift are not the same job, so this is

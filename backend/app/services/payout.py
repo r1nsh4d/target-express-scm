@@ -90,6 +90,18 @@ class LegFacts:
     coolie_paid: Decimal = Decimal("0")
     days: int = 1
 
+    # What the driver earned by unloading, priced per article off the driver
+    # column of the unloading rate card. When the division prices unloading per
+    # article this REPLACES the percentage arrangement entirely: the vendor is
+    # charged `a` for a chair and the driver is paid `b`, and the difference is
+    # Target Express's margin.
+    #
+    # None means this division does not price unloading per article, and the
+    # percentage applies instead. Zero is a different statement — a run where
+    # nothing priced was carried — and must not be confused with it, or a
+    # driver silently changes pay scheme on a quiet day.
+    unloading_piece_pay: Decimal | None = None
+
 
 @dataclass
 class PayoutLine:
@@ -204,6 +216,46 @@ def compute_driver_payout(rates: DriverPayRates, facts: LegFacts) -> LegPayout:
     # own explanation rather than left for someone to infer.
     out_of_pocket = money(facts.unloading_paid)
 
+    if facts.unloading_piece_pay is not None:
+        # Priced per article: the driver is paid for what he actually carried,
+        # off his own column of the same rate row the vendor is charged from.
+        # No percentage is involved, so there is nothing to floor — but he is
+        # still never left out of pocket, because cash he handed to labourers
+        # is his money until it comes back.
+        piece = money(facts.unloading_piece_pay)
+        unloading = max(piece, out_of_pocket)
+
+        if unloading:
+            if unloading > piece:
+                basis = (
+                    f"{piece} earned on the article rates, raised to "
+                    f"{out_of_pocket} actually paid out at the points"
+                    " - a driver is never left out of pocket"
+                )
+            else:
+                retained = money(money(facts.unloading_billed) - unloading)
+                basis = (
+                    f"{piece} on the article rates"
+                    f" - vendor billed {money(facts.unloading_billed)},"
+                    f" Target Express keeps {retained}"
+                )
+            lines.append(
+                PayoutLine(
+                    head=ChargeHead.LOADING_UNLOADING,
+                    amount=unloading,
+                    quantity=facts.unloading_billed,
+                    rate=Decimal("0"),
+                    basis=basis,
+                )
+            )
+    else:
+        _percentage_unloading(lines, facts, rates, out_of_pocket)
+
+    return _finish_driver_payout(lines, facts, rates)
+
+
+def _percentage_unloading(lines, facts, rates, out_of_pocket: Decimal) -> None:
+    """The older arrangement: a share of the unloading rather than a rate."""
     if rates.unloading_share_basis == UnloadingShareBasis.BILLED_TO_VENDOR:
         unloading_base = money(facts.unloading_billed)
         base_label = "billed to the vendor"
@@ -253,6 +305,9 @@ def compute_driver_payout(rates: DriverPayRates, facts: LegFacts) -> LegPayout:
             )
         )
 
+
+def _finish_driver_payout(lines, facts, rates) -> LegPayout:
+    """Whatever is paid the same way under either unloading arrangement."""
     # Coolie money is REIMBURSED IN FULL, never shared.
     #
     # It is not earnings. A local porter gang at a market demanded cash before

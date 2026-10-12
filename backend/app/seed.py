@@ -171,15 +171,22 @@ def seed_masters(db: Session) -> dict:
     # Furniture unloading is priced per article plus a climb charge per floor.
     # The chair line is the client's own worked example: 50 on the ground, 10 a
     # floor, so 90 to the 4th floor.
+    #
+    # Four figures per article, not two: what the VENDOR is charged and what the
+    # DRIVER is paid for carrying the same thing. The gap is Target Express's
+    # margin on unloading, which is the reason the company handles unloading at
+    # all rather than leaving the customer to arrange it. Roughly 60% of the
+    # charge goes to the man doing the carrying.
     furniture_rates = [
-        ("CHAIR", "Chair", "50", "10"),
-        ("TABLE", "Table", "120", "25"),
-        ("WARDROBE", "Wardrobe", "400", "80"),
-        ("BED", "Bed", "350", "70"),
-        ("MATTRESS", "Mattress", "150", "30"),
-        ("SOFA", "Sofa", "300", "60"),
+        # code, name, vendor base, vendor /floor, driver base, driver /floor
+        ("CHAIR", "Chair", "50", "10", "30", "6"),
+        ("TABLE", "Table", "120", "25", "70", "15"),
+        ("WARDROBE", "Wardrobe", "400", "80", "240", "48"),
+        ("BED", "Bed", "350", "70", "210", "42"),
+        ("MATTRESS", "Mattress", "150", "30", "90", "18"),
+        ("SOFA", "Sofa", "300", "60", "180", "36"),
     ]
-    for code, name, base, per_floor in furniture_rates:
+    for code, name, base, per_floor, driver_base, driver_per_floor in furniture_rates:
         _get_or_create(
             db,
             UnloadingItemRate,
@@ -187,6 +194,8 @@ def seed_masters(db: Session) -> dict:
                 "item_name": name,
                 "base_rate": Decimal(base),
                 "per_floor_rate": Decimal(per_floor),
+                "driver_base_rate": Decimal(driver_base),
+                "driver_per_floor_rate": Decimal(driver_per_floor),
                 "charge_floors_with_lift": False,
             },
             vendor_division_id=ocp.id,
