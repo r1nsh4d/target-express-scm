@@ -187,7 +187,7 @@ def seed_masters(db: Session) -> dict:
         ("SOFA", "Sofa", "300", "60", "180", "36"),
     ]
     for code, name, base, per_floor, driver_base, driver_per_floor in furniture_rates:
-        _get_or_create(
+        rate, created = _get_or_create(
             db,
             UnloadingItemRate,
             {
@@ -202,6 +202,20 @@ def seed_masters(db: Session) -> dict:
             item_code=code,
             effective_from=CONTRACT_START,
         )
+        # Fill the driver's side on rows seeded before it existed.
+        #
+        # _get_or_create leaves an existing row alone, which is right — seeding
+        # must never overwrite a rate somebody has since negotiated. But a row
+        # created before the driver column existed has zero in it, and zero
+        # means "this division pays a percentage instead". So a server seeded
+        # last week would quietly keep the old arrangement after an upgrade,
+        # with nothing on screen to say why.
+        #
+        # Only zeros are filled. A driver rate anybody has actually set is left
+        # exactly as it is.
+        if not created and not rate.driver_base_rate:
+            rate.driver_base_rate = Decimal(driver_base)
+            rate.driver_per_floor_rate = Decimal(driver_per_floor)
 
     # Loading crew at the godown. Largely the same faces every day, so the admin
     # picks a name rather than retyping it.
