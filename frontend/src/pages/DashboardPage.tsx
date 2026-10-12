@@ -16,6 +16,7 @@ import { Link } from 'react-router-dom'
 import { Badge, Card, EmptyState } from '@/components/ui'
 import { api } from '@/lib/api'
 import { stagger, useCountUp } from '@/lib/motion'
+import { rupees } from '@/lib/resources'
 
 interface OdometerGap {
   registration_no: string
@@ -196,6 +197,16 @@ export default function DashboardPage() {
     queryFn: async () => (await api.get<Summary>('/dashboard/summary')).data,
   })
 
+  /* Money, on the screen people actually open.
+     Trips and boxes say whether today is going well. This says whether the
+     month is — and the figure that matters most is what has been invoiced and
+     NOT paid, which otherwise lives three clicks away under Vendor invoices
+     and goes unlooked at until somebody wonders where the cash is. */
+  const earnings = useQuery({
+    queryKey: ['/reports/earnings'],
+    queryFn: async () => (await api.get<Earnings>('/reports/earnings')).data,
+  })
+
   /* Skeletons rather than a spinner. The page keeps its shape while the data is
      in flight, so nothing jumps when it lands — and the shapes themselves tell
      you what is coming. */
@@ -243,6 +254,8 @@ export default function DashboardPage() {
           year: 'numeric',
         })}
       </p>
+
+      {earnings.data ? <Money data={earnings.data} /> : null}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat
@@ -447,5 +460,93 @@ export default function DashboardPage() {
         </Card>
       </div>
     </div>
+  )
+}
+
+
+interface Earnings {
+  month_invoiced: string
+  month_received: string
+  month_margin: string
+  outstanding_total: string
+  outstanding_count: number
+  oldest_unpaid_days: number | null
+}
+
+/* The month's money, across the top.
+ *
+ * Deliberately four figures and no chart. Somebody opening this at 7am wants to
+ * know whether the month is working and whether anyone owes them — and the
+ * outstanding figure ignores the month boundary on purpose, because an invoice
+ * from August that nobody has paid is the most important number here and would
+ * vanish from a strict month-to-date total. */
+function Money({ data }: { data: Earnings }) {
+  const owed = Number(data.outstanding_total)
+  const late = (data.oldest_unpaid_days ?? 0) > 30
+
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <MoneyCard label="Invoiced this month" value={rupees(data.month_invoiced)} />
+      <MoneyCard
+        label="Received this month"
+        value={rupees(data.month_received)}
+        tone="success"
+      />
+      <MoneyCard
+        label="Margin this month"
+        value={rupees(data.month_margin)}
+        tone={Number(data.month_margin) >= 0 ? 'success' : 'danger'}
+      />
+      <MoneyCard
+        label={
+          data.outstanding_count
+            ? `Owed to you · ${data.outstanding_count} invoice${data.outstanding_count === 1 ? '' : 's'}`
+            : 'Owed to you'
+        }
+        value={rupees(data.outstanding_total)}
+        tone={owed > 0 ? (late ? 'danger' : 'warning') : undefined}
+        note={
+          late && data.oldest_unpaid_days
+            ? `oldest waiting ${data.oldest_unpaid_days} days`
+            : undefined
+        }
+      />
+    </div>
+  )
+}
+
+function MoneyCard({
+  label,
+  value,
+  tone,
+  note,
+}: {
+  label: string
+  value: string
+  tone?: 'success' | 'warning' | 'danger'
+  note?: string
+}) {
+  const colour =
+    tone === 'success'
+      ? 'var(--success)'
+      : tone === 'warning'
+        ? 'var(--warning)'
+        : tone === 'danger'
+          ? 'var(--danger)'
+          : undefined
+  return (
+    <Card className="px-4 py-3">
+      <p className="truncate text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+        {label}
+      </p>
+      <p className="tnum mt-1 text-[18px] font-semibold" style={colour ? { color: colour } : undefined}>
+        {value}
+      </p>
+      {note ? (
+        <p className="mt-0.5 text-[11px]" style={{ color: 'var(--warning)' }}>
+          {note}
+        </p>
+      ) : null}
+    </Card>
   )
 }

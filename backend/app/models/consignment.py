@@ -107,6 +107,28 @@ class Box(BaseModel):
 
     remarks: Mapped[str | None] = mapped_column(Text)
 
+    # --- came back ---------------------------------------------------------- #
+    #
+    # A carton that did not stay at the point. The status says WHAT happened —
+    # refused, damaged, nobody there — and these say when, who recorded it and
+    # why.
+    #
+    # The reason is the part that earns its place. "12 boxes came back" is a
+    # number; "4 refused by Anand Agencies, wrong model" is something the
+    # vendor can be told and the warehouse can act on. Without it a return is
+    # an unexplained hole in the reconciliation, which is exactly what the
+    # reconciliation exists to prevent.
+    returned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    returned_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    return_reason: Mapped[str | None] = mapped_column(Text)
+
+    returned_by: Mapped["User | None"] = relationship(  # noqa: F821
+        foreign_keys=[returned_by_id], lazy="joined"
+    )
     consignment: Mapped[Consignment] = relationship(back_populates="boxes")
 
     def __repr__(self) -> str:

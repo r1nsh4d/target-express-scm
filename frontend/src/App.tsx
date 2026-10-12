@@ -13,6 +13,8 @@ import GuidePage from '@/pages/GuidePage'
 import DaySheetPage from '@/pages/DaySheetPage'
 import InvoicesPage from '@/pages/InvoicesPage'
 import MoneyInPage from '@/pages/MoneyInPage'
+import ReportsPage from '@/pages/ReportsPage'
+import ReturnsPage from '@/pages/ReturnsPage'
 import LabelsPage from '@/pages/LabelsPage'
 import MarketVehiclesPage from '@/pages/MarketVehiclesPage'
 import RoutePresetsPage from '@/pages/RoutePresetsPage'
@@ -111,6 +113,8 @@ export default function App() {
         <Route path="route-presets" element={<RoutePresetsPage />} />
         <Route path="market-vehicles" element={<MarketVehiclesPage />} />
         <Route path="day-sheet" element={<DaySheetPage />} />
+        <Route path="returns" element={<ReturnsPage />} />
+        <Route path="reports" element={<ReportsPage />} />
         <Route path="invoices" element={<InvoicesPage />} />
         <Route path="money-in" element={<MoneyInPage />} />
         <Route path="settlements" element={<SettlementsPage />} />

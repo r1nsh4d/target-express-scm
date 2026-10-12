@@ -6,6 +6,7 @@
  * role should not see it. */
 
 import {
+  BarChart3,
   BookOpen,
   Bookmark,
   Building2,
@@ -16,6 +17,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   Package,
+  PackageX,
   PhoneCall,
   ReceiptIndianRupee,
   ReceiptText,
@@ -78,6 +80,7 @@ export const NAV: NavItem[] = [
   { to: '/route-presets', label: 'Saved routes', blurb: 'The rounds you already run — pick one and the whole trip is filled in', icon: <Bookmark className={ICON} />, roles: OPS, group: 1, keywords: 'presets rounds no 11 template recurring' },
   { to: '/labels', label: 'Sorting & labels', blurb: 'Sort boxes by point and print the stickers', icon: <ScanBarcode className={ICON} />, roles: OPS, group: 1, keywords: 'print stickers barcode sort' },
 
+  { to: '/returns', label: 'Returns', blurb: 'Cartons that came back, and why', icon: <PackageX className={ICON} />, roles: OPS, group: 1, keywords: 'rto refused damaged not delivered came back' },
   { to: '/vendors', label: 'Vendors', blurb: 'Vendors, their divisions, warehouses and rates', icon: <Building2 className={ICON} />, roles: ADMIN, group: 2, keywords: 'clients godrej divisions godown warehouse' },
   { to: '/consignees', label: 'Customers', blurb: 'Delivery points — customers and distribution centres', icon: <Users className={ICON} />, roles: OPS, group: 2, keywords: 'consignees points dealers' },
   { to: '/vehicles', label: 'Vehicles', blurb: 'Owned and rented vehicles, and who gets paid', icon: <Truck className={ICON} />, roles: ADMIN, group: 2, keywords: 'trucks lorry fleet owners' },
@@ -92,6 +95,7 @@ export const NAV: NavItem[] = [
   { to: '/money-in', label: 'Money in', blurb: 'Payments received from vendors, against each invoice', icon: <Landmark className={ICON} />, roles: MONEY, group: 3, keywords: 'payments received collection receipts tds bank credit' },
   { to: '/settlements', label: 'Settlements', blurb: 'Pay drivers and vehicle owners', icon: <Wallet className={ICON} />, roles: MONEY, group: 3, keywords: 'payout payments salary hire' },
   { to: '/advances', label: 'Advances', blurb: 'Cash handed over before a settlement, and its recovery', icon: <HandCoins className={ICON} />, roles: MONEY, group: 3, keywords: 'cash loan recovery' },
+  { to: '/reports', label: 'Reports', blurb: 'What the business did, over a period', icon: <BarChart3 className={ICON} />, roles: [...MONEY, 'STAKEHOLDER'], group: 3, keywords: 'analytics summary month revenue margin performance' },
   { to: '/expenses', label: 'Expenses', blurb: 'What drivers paid on the road, waiting for a decision', icon: <ReceiptText className={ICON} />, roles: [...MONEY, 'OPS_ADMIN'], group: 3, keywords: 'diesel toll claims approve' },
 
   { to: '/enquiries', label: 'Enquiries', blurb: 'Businesses who asked to work with Target Express', icon: <MessageSquare className={ICON} />, roles: ADMIN, group: 4, keywords: 'leads contact sales website' },
