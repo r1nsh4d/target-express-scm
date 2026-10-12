@@ -15,6 +15,7 @@ Two things these tests care about, and neither is the happy path:
 """
 
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 
@@ -337,3 +338,131 @@ def test_the_latest_point_reaches_the_tracking_page(client, running):
     body = client.get("/api/track/a-token-for-the-ping-test").json()
     assert body["vehicle_position"] is not None, "the page had no vehicle to draw"
     assert round(body["vehicle_position"]["latitude"], 2) == 11.26, "not the most recent point"
+
+
+# ---------------------------------------------------------------------------
+# What the customer is actually told
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def tracked(client, running):
+    """A tracking link for the stop, with the stop's own pin dropped."""
+    from app.db.session import SessionLocal
+    from app.models.freight import FreightPoint
+    from app.models.tracking import TrackingSession
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    point = db.execute(
+        select(FreightPoint).where(FreightPoint.freight_id == running["freight"])
+    ).scalars().first()
+    # Kannur, which is about 220 km up the coast from Kochi.
+    point.latitude = Decimal("11.8745")
+    point.longitude = Decimal("75.3704")
+    db.add(
+        TrackingSession(
+            freight_point_id=point.id,
+            token="eta-test-token",
+            expires_at=datetime.now() + timedelta(days=3),
+        )
+    )
+    db.commit()
+    db.close()
+    return "eta-test-token"
+
+
+def test_with_no_position_there_is_no_estimate(client, running, tracked):
+    """Nothing invented before the lorry has reported."""
+    body = client.get(f"/api/track/{tracked}").json()
+    assert body["vehicle_position"] is None
+    assert body["distance_km"] is None
+    assert body["eta_minutes"] is None
+
+
+def test_a_position_produces_a_distance_and_a_time(client, running, tracked):
+    """The whole chain: the driver's phone reports, and the customer is told
+    how far away it is and roughly how long."""
+    # Kozhikode, roughly 90 km short of Kannur.
+    _send(client, running, [{"latitude": "11.2588", "longitude": "75.7804"}])
+
+    body = client.get(f"/api/track/{tracked}").json()
+    assert body["vehicle_position"] is not None
+    assert 60 < body["distance_km"] < 110, body["distance_km"]
+    assert body["eta_minutes"] is not None
+    # Around 90 km of straight line, so a couple of hours of road.
+    assert 90 < body["eta_minutes"] < 320, body["eta_minutes"]
+
+
+def test_closer_means_sooner(client, running, tracked):
+    """Obvious, and worth a test: an estimate that does not fall as the lorry
+    approaches is worse than none."""
+    _send(client, running, [
+        {"latitude": "11.2588", "longitude": "75.7804",
+         "recorded_at": (datetime.now() - timedelta(hours=1)).isoformat()},
+    ])
+    far = client.get(f"/api/track/{tracked}").json()
+
+    # Thalassery, about 20 km out.
+    _send(client, running, [{"latitude": "11.7480", "longitude": "75.4929"}])
+    near = client.get(f"/api/track/{tracked}").json()
+
+    assert near["distance_km"] < far["distance_km"]
+    assert near["eta_minutes"] < far["eta_minutes"]
+
+
+def test_a_customer_with_no_pin_gets_no_estimate(client, running, tracked):
+    """Measuring to the middle of their town and calling it an estimate is
+    worse than saying nothing."""
+    from app.db.session import SessionLocal
+    from app.models.freight import FreightPoint
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    point = db.execute(
+        select(FreightPoint).where(FreightPoint.freight_id == running["freight"])
+    ).scalars().first()
+    point.latitude = None
+    point.longitude = None
+    db.commit()
+    db.close()
+
+    _send(client, running, [{"latitude": "11.2588", "longitude": "75.7804"}])
+    body = client.get(f"/api/track/{tracked}").json()
+
+    assert body["vehicle_position"] is not None, "the map can still be drawn"
+    assert body["eta_minutes"] is None, "but not an estimate"
+
+
+def test_stops_ahead_push_the_estimate_out(client, running, tracked):
+    """Two deliveries before yours is most of an hour, and the estimate has to
+    say so or it is wrong every time."""
+    from app.db.session import SessionLocal
+    from app.models.consignee import Consignee
+    from app.models.enums import ConsigneeType, GeoConfidence
+    from app.models.freight import FreightPoint
+    from sqlalchemy import select
+
+    _send(client, running, [{"latitude": "11.2588", "longitude": "75.7804"}])
+    alone = client.get(f"/api/track/{tracked}").json()["eta_minutes"]
+
+    db = SessionLocal()
+    point = db.execute(
+        select(FreightPoint).where(FreightPoint.freight_id == running["freight"])
+    ).scalars().first()
+    point.sequence = 3
+    other = Consignee(
+        name="Somewhere Else",
+        type=ConsigneeType.RETAIL_CUSTOMER,
+        geo_confidence=GeoConfidence.UNVERIFIED,
+    )
+    db.add(other)
+    db.flush()
+    for seq in (1, 2):
+        db.add(FreightPoint(freight_id=running["freight"], sequence=seq, consignee_id=other.id))
+    db.commit()
+    db.close()
+
+    after = client.get(f"/api/track/{tracked}").json()
+    assert after["stops_before"] == 2
+    assert after["eta_minutes"] > alone, "the stops ahead were not counted"

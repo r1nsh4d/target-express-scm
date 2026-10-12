@@ -13,6 +13,10 @@ import { useParams } from 'react-router-dom'
 import { Button, Card, ErrorNote, Spinner } from '@/components/ui'
 import { api, apiErrorMessage } from '@/lib/api'
 
+const TrackMap = lazy(() =>
+  import('@/components/TrackMap').then((m) => ({ default: m.TrackMap })),
+)
+
 const LocationPicker = lazy(() =>
   import('@/components/LocationPicker').then((m) => ({ default: m.LocationPicker })),
 )
@@ -45,6 +49,8 @@ interface Tracking {
   longitude: number | null
   can_update_location: boolean
   vehicle_position: { latitude: number; longitude: number; recorded_at: string } | null
+  distance_km: number | null
+  eta_minutes: number | null
   driver_phone: string | null
   delivery_photo_url: string | null
   receiver_name: string | null
@@ -154,6 +160,58 @@ export default function TrackPage() {
               <CheckCircle2 className="size-4" />
               Received by {data.receiver_name}
             </p>
+          ) : null}
+
+          {/* Where it is, and roughly how long.
+              Shown together because neither is much use alone: a lorry on a map
+              with no sense of when, or a time with no sense of where, both
+              leave the customer asking the same question they opened the link
+              to answer. */}
+          {!delivered && data.vehicle_position ? (
+            <div className="mt-4">
+              <Suspense fallback={<div className="skeleton" style={{ height: 220 }} />}>
+                <TrackMap
+                  vehicle={data.vehicle_position}
+                  destination={
+                    data.latitude !== null && data.longitude !== null
+                      ? { latitude: data.latitude, longitude: data.longitude }
+                      : null
+                  }
+                />
+              </Suspense>
+
+              <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                {data.eta_minutes !== null ? (
+                  <span className="text-[15px] font-semibold">
+                    Arriving in about {humanMinutes(data.eta_minutes)}
+                  </span>
+                ) : data.distance_km !== null ? (
+                  <span className="text-[15px] font-semibold">Still some way off</span>
+                ) : null}
+                {data.distance_km !== null ? (
+                  <span className="tnum text-[13px]" style={{ color: 'var(--text-muted)' }}>
+                    {data.distance_km} km away
+                  </span>
+                ) : null}
+                <span className="text-[12px]" style={{ color: 'var(--text-faint)' }}>
+                  updated {sinceText(data.vehicle_position.recorded_at)}
+                </span>
+              </div>
+
+              {/* Said plainly. Every delivery company's "arriving at 14:37" is
+                  wrong often enough to be resented, and a customer deciding
+                  whether to go out is better served by an honest rough answer
+                  than a precise-looking one. */}
+              {data.eta_minutes !== null ? (
+                <p className="mt-1 text-[12px]" style={{ color: 'var(--text-faint)' }}>
+                  An estimate from the lorry's position
+                  {data.stops_before > 0
+                    ? ` and the ${data.stops_before} ${data.stops_before === 1 ? 'stop' : 'stops'} before yours`
+                    : ''}
+                  . Traffic and the road will change it.
+                </p>
+              ) : null}
+            </div>
           ) : null}
 
           {data.driver_phone && !delivered ? (
@@ -305,4 +363,39 @@ function Shell({ children }: { children: React.ReactNode }) {
       <main className="mx-auto max-w-lg px-4 py-5">{children}</main>
     </div>
   )
+}
+
+/* "about 2 hours", not "127 minutes".
+ *
+ * The estimate is rough, so the wording is rounded to match it. Reporting 127
+ * minutes claims a precision the calculation does not have, and a customer
+ * reads the odd number as a promise. */
+function humanMinutes(total: number): string {
+  if (total < 10) return 'a few minutes'
+  if (total < 60) return `${Math.round(total / 5) * 5} minutes`
+
+  const hours = Math.floor(total / 60)
+  const minutes = Math.round((total % 60) / 15) * 15
+
+  if (hours >= 6) return `${hours} hours`
+  if (minutes === 0 || minutes === 60) {
+    const h = minutes === 60 ? hours + 1 : hours
+    return h === 1 ? 'an hour' : `${h} hours`
+  }
+  if (minutes === 30) return hours === 1 ? 'an hour and a half' : `${hours}½ hours`
+  return `${hours} hour${hours === 1 ? '' : 's'} ${minutes} minutes`
+}
+
+/* How stale the position is.
+ *
+ * Worth saying. A lorry that last reported forty minutes ago is in a dead spot,
+ * and a customer watching a marker that has not moved deserves to know that
+ * rather than conclude the lorry is parked. */
+function sinceText(iso: string): string {
+  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000)
+  if (seconds < 120) return 'just now'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes} minutes ago`
+  const hours = Math.round(minutes / 60)
+  return hours === 1 ? 'an hour ago' : `${hours} hours ago`
 }

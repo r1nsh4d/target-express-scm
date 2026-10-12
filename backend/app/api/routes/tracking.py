@@ -65,6 +65,10 @@ class TrackingOut(BaseModel):
     can_update_location: bool
 
     vehicle_position: VehiclePositionOut | None
+    # How far the lorry still has to come, and roughly how long that takes.
+    # Both are None until there is a position to measure from.
+    distance_km: float | None = None
+    eta_minutes: int | None = None
     driver_phone: str | None
     delivery_photo_url: str | None
     receiver_name: str | None
@@ -90,6 +94,40 @@ def _metres_between(lat1: float, lon1: float, lat2: float, lon2: float) -> int:
     dl = math.radians(lon2 - lon1)
     a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return int(r * 2 * math.asin(math.sqrt(a)))
+
+
+# Turning a straight line into a drive, and a drive into a time.
+#
+# Every number here is an assumption, and they are named rather than buried so
+# that somebody who knows the roads better can change them.
+#
+# ROAD_FACTOR: roads are not straight lines. Kerala is long and thin with one
+# coastal highway doing most of the work, so the drive is reliably longer than
+# the crow flies — but not by much on a north-south run, which is most of them.
+ROAD_FACTOR = 1.35
+# A loaded lorry, averaged over highway, town and the inevitable halt. Not the
+# speed it travels at; the speed it gets there at.
+AVERAGE_KMPH = 34
+# What a stop costs before the lorry moves again: finding the place, unloading,
+# the receiver signing, the paperwork.
+MINUTES_PER_STOP = 22
+# Beyond this the estimate is not worth showing. A lorry 400 km away may be
+# tomorrow, and "about 13 hours" reads as precision nobody has.
+MAX_SENSIBLE_KM = 320
+
+
+def _eta_minutes(distance_km: float, stops_ahead: int) -> int | None:
+    """Roughly how long until the lorry is at the door.
+
+    Deliberately coarse, and presented as such. A customer wants to know
+    whether to wait in or go out, and an estimate honest about being an
+    estimate serves that better than a precise-looking time that is wrong —
+    which is what every delivery company's "arriving at 14:37" turns out to be.
+    """
+    if distance_km > MAX_SENSIBLE_KM:
+        return None
+    driving = (distance_km * ROAD_FACTOR / AVERAGE_KMPH) * 60
+    return int(round(driving + stops_ahead * MINUTES_PER_STOP))
 
 
 def _session(db: Session, token: str) -> TrackingSession:
@@ -163,6 +201,8 @@ def track(token: str, db: Session = Depends(get_db)) -> TrackingOut:
 
     position = None
     driver_phone = None
+    distance_km: float | None = None
+    eta_minutes: int | None = None
     if dispatched and not delivered:
         ping = (
             db.execute(
@@ -183,6 +223,19 @@ def track(token: str, db: Session = Depends(get_db)) -> TrackingOut:
         leg = freight.legs[-1] if freight.legs else None
         driver_phone = leg.driver.phone if leg and leg.driver else None
 
+        # Only measurable with both ends of the line. A customer whose pin has
+        # never been dropped gets the map and no estimate, rather than an
+        # estimate measured to the middle of their town.
+        if ping is not None and point.latitude is not None and point.longitude is not None:
+            metres = _metres_between(
+                float(ping.latitude),
+                float(ping.longitude),
+                float(point.latitude),
+                float(point.longitude),
+            )
+            distance_km = round(metres / 1000, 1)
+            eta_minutes = _eta_minutes(distance_km, stops_before)
+
     db.commit()
 
     return TrackingOut(
@@ -202,6 +255,8 @@ def track(token: str, db: Session = Depends(get_db)) -> TrackingOut:
         # Once it has been delivered there is nothing left to correct.
         can_update_location=not delivered,
         vehicle_position=position,
+        distance_km=distance_km,
+        eta_minutes=eta_minutes,
         driver_phone=driver_phone,
         delivery_photo_url=point.delivery_photo_url,
         receiver_name=point.receiver_name if delivered else None,
