@@ -120,6 +120,9 @@ class PointOut(BaseModel):
     coolie_note: str | None
     status: FreightPointStatus
     tracking_url: str | None = None
+    tracking_expires_at: datetime | None = None
+    # True when a link was issued and has since run out.
+    tracking_expired: bool = False
 
 
 class LegOut(BaseModel):
@@ -224,11 +227,29 @@ def _point_out(point: FreightPoint, include_tracking: bool = False) -> PointOut:
         status=point.status,
     )
     if include_tracking:
+        # Both conditions, because the tracking endpoint checks both. Testing
+        # only is_active meant the screen went on offering a link for days
+        # after it had expired: the customer opened it and was told to contact
+        # the sender, and the sender was looking at a link that appeared fine.
+        now = datetime.now()
         session = next(
-            (s for s in getattr(point, "_tracking_sessions", []) if s.is_active), None
+            (
+                s
+                for s in getattr(point, "_tracking_sessions", [])
+                if s.is_active and s.expires_at > now
+            ),
+            None,
         )
         if session is not None:
             out.tracking_url = f"{settings.public_base_url}/track/{session.token}"
+            out.tracking_expires_at = session.expires_at
+        else:
+            # Distinguishes "never had one" from "had one and it ran out", so
+            # the screen can offer to issue a fresh link rather than leaving a
+            # blank where the link used to be.
+            out.tracking_expired = any(
+                s.is_active for s in getattr(point, "_tracking_sessions", [])
+            )
     return out
 
 
@@ -561,12 +582,15 @@ def dispatch(freight_id: str, db: Session = Depends(get_db), _=OpsDep):
 
     expiry = datetime.now() + timedelta(days=TRACKING_LINK_DAYS)
     for point in freight.points:
+        # An expired session is still is_active, so matching on that alone
+        # meant a re-dispatch quietly reused a dead link.
         existing = db.execute(
             select(TrackingSession).where(
                 TrackingSession.freight_point_id == point.id,
                 TrackingSession.is_active.is_(True),
+                TrackingSession.expires_at > datetime.now(),
             )
-        ).scalar_one_or_none()
+        ).scalars().first()
         if existing is None:
             db.add(
                 TrackingSession(
@@ -579,6 +603,58 @@ def dispatch(freight_id: str, db: Session = Depends(get_db), _=OpsDep):
 
     freight.status = FreightStatus.DISPATCHED
     freight.dispatched_at = datetime.now()
+    db.commit()
+    db.refresh(freight)
+    return _freight_out(db, freight)
+
+
+@router.post("/{freight_id}/points/{point_id}/tracking-link", response_model=FreightOut)
+def reissue_tracking_link(
+    freight_id: str, point_id: str, db: Session = Depends(get_db), _=OpsDep
+):
+    """Issue a fresh tracking link for one stop.
+
+    The expired page tells the customer to contact the sender for a new link,
+    and until now the sender had no way to produce one: links were created at
+    dispatch and nowhere else, and the dispatch path skipped any point that
+    already had a session. A delivery that slipped past three days left the
+    customer with a dead link and the office with no answer.
+
+    The old link is retired rather than left alongside the new one. Two live
+    links to the same delivery is one more than anybody can keep track of, and
+    the whole point of an expiry is that a link stops working eventually.
+    """
+    freight = _load(db, freight_id)
+
+    point = next((p for p in freight.points if str(p.id) == point_id), None)
+    if point is None:
+        raise HTTPException(status_code=404, detail="That stop is not on this freight")
+
+    if freight.status in (FreightStatus.DRAFT, FreightStatus.PLANNED):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This freight has not been dispatched. Tracking links are issued at "
+                "dispatch, because there is nothing to follow until the vehicle leaves."
+            ),
+        )
+
+    for session in db.execute(
+        select(TrackingSession).where(
+            TrackingSession.freight_point_id == point.id,
+            TrackingSession.is_active.is_(True),
+        )
+    ).scalars():
+        session.is_active = False
+
+    db.add(
+        TrackingSession(
+            freight_point_id=point.id,
+            token=secrets.token_urlsafe(24),
+            expires_at=datetime.now() + timedelta(days=TRACKING_LINK_DAYS),
+            sent_to_phone=point.consignee.phone,
+        )
+    )
     db.commit()
     db.refresh(freight)
     return _freight_out(db, freight)

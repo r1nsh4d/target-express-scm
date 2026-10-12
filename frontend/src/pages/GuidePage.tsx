@@ -1,5 +1,8 @@
 import {
   Building2,
+  Landmark,
+  Monitor,
+  ScanBarcode,
   Command,
   Check,
   Package,
@@ -31,6 +34,12 @@ interface Step {
   why: string
   todo: string[]
   watch?: string
+  /* Who does it, and where. The commonest question about this system is not
+     how a step works but whose job it is — the office kept looking for
+     delivery buttons that only exist on the driver's phone, and drivers were
+     told to do things that can only be done on the web. Every step on the
+     daily run says which it is. */
+  who?: 'office' | 'driver'
 }
 
 const SETUP: Step[] = [
@@ -117,51 +126,115 @@ const SETUP: Step[] = [
 const RUN: Step[] = [
   {
     n: '08',
-    icon: <Route className="size-4" />,
-    title: 'Build the freight',
-    to: '/freights',
-    why: 'A freight is one run: out from a warehouse, round its points, back again.',
+    icon: <Package className="size-4" />,
+    title: 'Enter the day’s bills',
+    to: '/consignments',
+    who: 'office',
+    why: 'The goods arrive from the vendor with their bills already on them. Nothing downstream exists until those bills are in — a bill creates one box per carton, and the boxes are what get labelled, scanned and counted.',
     todo: [
-      'Pick the vendor division, the origin warehouse and the date.',
-      'Add the points in delivery order, with the floor and planned box count for each.',
-      'Assign the vehicle and driver.',
+      'Consignments → New consignment, one per vendor bill.',
+      'Enter the vendor’s own bill number. It is printed on every sticker, because it is the number the godown and the customer both recognise.',
+      'Set the number of boxes carefully — it is what the driver counts against at the door.',
+      'A customer who has never been delivered to before can be added right there, without leaving the form.',
     ],
+    watch: 'Bills come before the freight. The freight screen can only attach bills that already exist.',
   },
   {
     n: '09',
-    icon: <Package className="size-4" />,
-    title: 'Load and dispatch',
+    icon: <Route className="size-4" />,
+    title: 'Build the freight',
     to: '/freights',
-    why: 'The count into the vehicle is the number the delivery count is checked against. This is the whole missing-box story.',
+    who: 'office',
+    why: 'A freight is one run: out from a warehouse, round its points, back again. A point is one customer — one stop.',
     todo: [
-      'Confirm the box count for each point as it is loaded.',
-      'Press Dispatch — the LR number is issued from the vehicle’s book and a tracking link opens for every customer.',
+      'Freights → New trip. Pick the vendor division, the origin warehouse and the date.',
+      'Add the points in the order they will be delivered. Customers with bills waiting are listed first and say how many.',
+      'Set the floor for each point — the climb is what the unloading charge is argued over.',
+      'A recurring round can be loaded from Saved routes instead of typing the stops again.',
     ],
   },
   {
     n: '10',
-    icon: <Smartphone className="size-4" />,
-    title: 'The driver runs it',
-    why: 'From his phone, at /driver. He sees only what he needs, one point at a time.',
+    icon: <Truck className="size-4" />,
+    title: 'Attach the bills to each stop',
+    to: '/freights',
+    who: 'office',
+    why: 'This is the step most often missed. Creating the freight does not pull the bills in; each stop is given its own.',
     todo: [
-      'Enters the opening odometer before leaving.',
-      'Navigates to each point — one stop at a time, or the whole route in Google Maps.',
-      'Records boxes handed over, the receiver and the unloading paid.',
-      'Enters the closing odometer on return, which completes the freight.',
+      'Open the freight. On each point, press Bills and tick the ones for that customer.',
+      'A stop with no bills says so in amber — it would be a stop the lorry visits with nothing to drop.',
+      'Assign the vehicle and driver.',
     ],
+    watch: 'Until the bills are attached there are no boxes, so there is nothing to label and nothing to deliver.',
   },
   {
     n: '11',
-    icon: <ReceiptIndianRupee className="size-4" />,
-    title: 'Bill and settle',
-    why: 'The completed freight prices itself on the rate card in force on its date, and produces what the driver or vehicle owner is owed.',
+    icon: <ScanBarcode className="size-4" />,
+    title: 'Print and paste the stickers',
+    to: '/labels',
+    who: 'office',
+    why: 'One sticker per carton. Loaders sort by the colour band and the point number long before anyone reads a code — that is why those are the biggest things on the label.',
     todo: [
-      'Check the freight’s billing panel — every line shows the working behind it.',
-      'Bill one freight from its own screen, or raise an invoice for a period under Vendor invoices and tick the freights that go on it. Anything left unticked stays unbilled and comes up next time.',
-      'A freight reaches BILLED because an invoice exists, never by hand — so a billed freight always has a document behind it.',
-      'A draft can be edited or discarded; once issued it can only be cancelled, because the number has gone to the vendor.',
-      'Record the payment when it arrives. Enter what the BANK credited, not the invoice total — TDS deducted at source makes them differ, and the gap shows under Money in.',
-      'Settle the driver or vehicle owner for the same work.',
+      'Sorting & labels → pick the freight. Check the sorting sheet against what is on the floor.',
+      'Print, and paste one on every carton.',
+      'To reprint a single bill — a label torn off in the lorry — click that bill under Consignments instead of printing the whole freight again.',
+    ],
+    watch: 'Print only after the bills are attached. Before that the sticker has no point number and no colour, and sorts to nowhere.',
+  },
+  {
+    n: '12',
+    icon: <Package className="size-4" />,
+    title: 'Confirm loading, then dispatch',
+    to: '/freights',
+    who: 'office',
+    why: 'The count into the vehicle is the number the delivery count is checked against. This is the whole missing-box story.',
+    todo: [
+      'Confirm the box count for each point as it goes on the vehicle.',
+      'Press Dispatch. The LR number is issued from that vehicle’s own book, and a tracking link opens for every customer who has a mobile number.',
+    ],
+    watch: 'A tracking link works for three days. If a delivery slips past that, issue a new one from the stop on the freight screen.',
+  },
+  {
+    n: '13',
+    icon: <Smartphone className="size-4" />,
+    title: 'The driver runs the trip',
+    who: 'driver',
+    why: 'On his phone, signed in at /driver with his mobile number. He sees one trip and one stop at a time — nothing about rates, other drivers or the vendor.',
+    todo: [
+      'Before leaving: enters the opening odometer. The trip will not start without it.',
+      'At each stop: scans the cartons. A carton belonging to a different customer is refused on screen, before it is handed over, and the phone says which stop it actually belongs to.',
+      'Records the boxes handed over, who received them, a photo, and the unloading cash paid out.',
+      'Adds any toll or other expense he paid on the road, with a photo of the receipt.',
+      'On return: enters the closing odometer, which completes the freight.',
+    ],
+    watch: 'Nothing is forced. A carton that cannot take a sticker is still delivered — the count can be typed instead of scanned.',
+  },
+  {
+    n: '14',
+    icon: <ReceiptIndianRupee className="size-4" />,
+    title: 'Bill the vendor',
+    to: '/invoices',
+    who: 'office',
+    why: 'A completed freight prices itself on the rate card in force on its own date, not today’s, so an old trip re-prices exactly as it was first billed.',
+    todo: [
+      'Check the freight’s billing panel first — every line shows the working behind it.',
+      'Bill one freight from its own screen, or go to Vendor invoices, pick a division and a period, and tick the freights that go on it.',
+      'Anything left unticked stays unbilled and comes up on the next run.',
+      'A draft can have a line removed, or be discarded entirely — its freights go back to Completed.',
+    ],
+    watch: 'A freight reaches BILLED because an invoice exists, never by hand. Once an invoice is issued it can only be cancelled, because the number has gone to the vendor and a gap in the series is what an auditor asks about.',
+  },
+  {
+    n: '15',
+    icon: <Landmark className="size-4" />,
+    title: 'Record the payment, and settle',
+    to: '/money-in',
+    who: 'office',
+    why: 'Money in is what the bank actually credited. Money out is what the driver or vehicle owner is owed for the same work.',
+    todo: [
+      'When the vendor pays, record it against the invoice: date, amount, mode and reference.',
+      'Enter what the BANK credited, not the invoice total. TDS deducted at source makes them differ, and the gap is shown as a shortfall under Money in.',
+      'Settle the driver or vehicle owner for the same period under Settlements.',
     ],
   },
 ]
@@ -323,6 +396,9 @@ export default function GuidePage() {
       </Card>
 
       <Section title="Set up, once per vendor" steps={SETUP} />
+
+      <WhoDoesWhat />
+
       <Section title="Every working day" steps={RUN} />
 
       <Card className="p-6">
@@ -369,6 +445,7 @@ function Section({ title, steps }: { title: string; steps: Step[] }) {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-[15px] font-semibold">{s.title}</h3>
+                  {s.who ? <WhoBadge who={s.who} /> : null}
                   {s.to ? (
                     <Link
                       to={s.to}
@@ -413,6 +490,111 @@ function Section({ title, steps }: { title: string; steps: Step[] }) {
           </Card>
         ))}
       </div>
+    </section>
+  )
+}
+
+/* Whose job, and on which device.
+
+   The single most common confusion with this system is not how a step works
+   but who does it: the office looked for delivery buttons that exist only on
+   the driver's phone, and drivers were told to do things that can only be done
+   on the web. The badge answers it before the step is read. */
+function WhoBadge({ who }: { who: 'office' | 'driver' }) {
+  const office = who === 'office'
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+      style={{
+        background: office
+          ? 'color-mix(in oklab, var(--info) 15%, transparent)'
+          : 'color-mix(in oklab, var(--accent) 15%, transparent)',
+        color: office ? 'var(--info)' : 'var(--accent)',
+      }}
+    >
+      {office ? <Monitor className="size-3" /> : <Smartphone className="size-3" />}
+      {office ? 'Office · web' : 'Driver · phone'}
+    </span>
+  )
+}
+
+/* The division of labour, before any of the steps are read.
+
+   Two different people, two different devices, and almost no overlap. Said
+   plainly here because getting it wrong wastes the most time: an office trying
+   to mark a delivery, or a driver waiting for someone to tell him the rate. */
+function WhoDoesWhat() {
+  return (
+    <section>
+      <h2 className="eyebrow mb-3">Who does what</h2>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card className="p-5">
+          <div className="flex items-center gap-2">
+            <Monitor className="size-4" style={{ color: 'var(--info)' }} />
+            <h3 className="text-[15px] font-semibold">The office, on the web</h3>
+          </div>
+          <p className="mt-1.5 text-[13px]" style={{ color: 'var(--text-muted)' }}>
+            Everything before the vehicle leaves, and everything about money after it is back.
+          </p>
+          <ul className="mt-3 space-y-1.5">
+            {[
+              'Enters the day’s vendor bills, and the boxes under them',
+              'Builds the freight and puts the stops in delivery order',
+              'Attaches each bill to its stop',
+              'Prints the stickers',
+              'Confirms the loaded count, then dispatches — which issues the LR and the customers’ tracking links',
+              'Invoices the vendor and records what the vendor pays',
+              'Settles the driver and the vehicle owner',
+              'Approves the expenses the driver claimed on the road',
+            ].map((t) => (
+              <li key={t} className="flex gap-2.5 text-[13px] leading-relaxed">
+                <Check className="mt-[3px] size-3.5 shrink-0" style={{ color: 'var(--success)' }} />
+                <span>{t}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+
+        <Card className="p-5">
+          <div className="flex items-center gap-2">
+            <Smartphone className="size-4" style={{ color: 'var(--accent)' }} />
+            <h3 className="text-[15px] font-semibold">The driver, on his phone</h3>
+          </div>
+          <p className="mt-1.5 text-[13px]" style={{ color: 'var(--text-muted)' }}>
+            Signs in at <strong>/driver</strong> with his mobile number. Sees one trip, one stop at
+            a time — nothing about rates, other drivers or the vendor.
+          </p>
+          <ul className="mt-3 space-y-1.5">
+            {[
+              'Enters the opening odometer before leaving',
+              'Navigates to each stop, in order',
+              'Scans the cartons — a carton for another customer is refused before it is handed over',
+              'Records boxes handed over, who received them, and a photo',
+              'Records the unloading cash he paid out at the point',
+              'Claims tolls and other road expenses, with a photo of the receipt',
+              'Enters the closing odometer on return, which completes the freight',
+              'Sees his own earnings, if that is switched on for him',
+            ].map((t) => (
+              <li key={t} className="flex gap-2.5 text-[13px] leading-relaxed">
+                <Check className="mt-[3px] size-3.5 shrink-0" style={{ color: 'var(--success)' }} />
+                <span>{t}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      </div>
+
+      <Card className="mt-3 px-4 py-3 text-[13px] leading-relaxed">
+        <span className="font-medium">The one rule that catches people out.</span>{' '}
+        <span style={{ color: 'var(--text-muted)' }}>
+          A delivery is never marked from the office. It is marked by the driver at the door, on
+          his phone, because that is where the boxes and the receiver actually are — and there
+          is no screen anywhere that lets the office type a delivered count instead. If one is
+          recorded wrongly, the driver records that stop again from his phone. What the office can
+          change afterwards is the stop’s charges and its location, and the freight’s
+          status with a written reason; the count is the driver’s.
+        </span>
+      </Card>
     </section>
   )
 }

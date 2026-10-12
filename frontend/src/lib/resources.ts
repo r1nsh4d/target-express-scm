@@ -199,7 +199,12 @@ export interface FreightPoint {
   coolie_billed: string | number
   coolie_note: string | null
   status: string
+  // Only set while the link still works — an expired one is withheld, because
+  // the office was handing out links the customer could not open.
   tracking_url: string | null
+  tracking_expires_at?: string | null
+  // Separates "ran out" from "never issued", so the screen can offer a new one.
+  tracking_expired?: boolean
 }
 
 export interface FreightLeg {

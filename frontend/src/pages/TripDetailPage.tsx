@@ -72,6 +72,13 @@ export default function TripDetailPage() {
 
   const dispatch = useAction<undefined>(`${path}/dispatch`, { onSuccess: refresh })
 
+  const reissue = useMutation({
+    mutationFn: async (pointId: string) =>
+      (await api.post(`${path}/points/${pointId}/tracking-link`, {})).data,
+    onSuccess: refresh,
+    onError: (err) => setError(apiErrorMessage(err)),
+  })
+
   /* Raise an invoice for this freight alone, then open it.
      The freight becomes BILLED as a consequence of the invoice existing, which
      is the rule everywhere else — this only saves the trip to Invoices and the
@@ -304,7 +311,38 @@ export default function TripDetailPage() {
                       ) : null}
                     </p>
                   ) : null}
-                  {p.tracking_url ? <TrackingLink url={p.tracking_url} /> : null}
+                  {p.tracking_url ? (
+                    <>
+                      <TrackingLink url={p.tracking_url} />
+                      {p.tracking_expires_at ? (
+                        <p className="mt-0.5 text-[11px]" style={{ color: 'var(--text-faint)' }}>
+                          Works until {p.tracking_expires_at.slice(0, 10)}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {/* The link ran out. The customer's page tells them to ask
+                      the sender for a new one — this is the sender's end of
+                      that conversation, which previously did not exist. */}
+                  {p.tracking_expired ? (
+                    <div className="mt-1">
+                      <p className="text-[12px]" style={{ color: 'var(--warning)' }}>
+                        The tracking link for this stop has expired.
+                      </p>
+                      <button
+                        type="button"
+                        className="mt-0.5 text-[12px] underline underline-offset-2"
+                        style={{ color: 'var(--accent)' }}
+                        disabled={reissue.isPending}
+                        onClick={() => {
+                          setError(null)
+                          reissue.mutate(p.id)
+                        }}
+                      >
+                        Issue a new link
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   {['DRAFT', 'PLANNED', 'LOADING'].includes(t.status) ? (
