@@ -24,6 +24,8 @@ pytestmark = pytest.mark.tables(
     "freight_points",
     "consignments",
     "boxes",
+    "freight_legs",
+    "tracking_sessions",
 )
 
 
@@ -289,3 +291,54 @@ def test_an_unknown_bill_is_404(client, scene, auth):
 
 def test_the_reprint_needs_a_login(client, scene):
     assert _labels(client, {}, scene["bill_1"]).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# A stop with no bills on it
+# ---------------------------------------------------------------------------
+
+
+def test_a_point_reports_its_bills_and_boxes(client, scene, auth):
+    """The freight screen warns about an empty stop using these two numbers, so
+    they have to be the bills actually attached rather than the planned count
+    somebody typed when the trip was built."""
+    freight = client.get(f"/api/freights/{scene['freight']}", headers=auth).json()
+    points = {p["sequence"]: p for p in freight["points"]}
+
+    assert points[1]["bill_count"] == 1
+    assert points[1]["box_count"] == 4
+    assert points[2]["bill_count"] == 1
+    assert points[2]["box_count"] == 2
+
+
+def test_a_point_with_no_bills_reports_zero(client, scene, auth):
+    """The case the warning exists for: a freight built before its bills were
+    attached produces no boxes, so no labels, and the sorting sheet is a row of
+    zeroes with nothing saying why."""
+    from app.db.session import SessionLocal
+    from app.models.consignee import Consignee
+    from app.models.enums import ConsigneeType, GeoConfidence
+    from app.models.freight import FreightPoint
+
+    db = SessionLocal()
+    lonely = Consignee(
+        name="Nobody Yet",
+        type=ConsigneeType.RETAIL_CUSTOMER,
+        city="Aluva",
+        geo_confidence=GeoConfidence.UNVERIFIED,
+    )
+    db.add(lonely)
+    db.flush()
+    db.add(FreightPoint(freight_id=scene["freight"], sequence=3, consignee_id=lonely.id))
+    db.commit()
+    db.close()
+
+    freight = client.get(f"/api/freights/{scene['freight']}", headers=auth).json()
+    empty = next(p for p in freight["points"] if p["sequence"] == 3)
+
+    assert empty["bill_count"] == 0
+    assert empty["box_count"] == 0
+
+    # And the freight-wide label print produces nothing for that stop.
+    labels = client.get(f"/api/freights/{scene['freight']}/labels", headers=auth).json()
+    assert all(label["point_sequence"] != 3 for label in labels)

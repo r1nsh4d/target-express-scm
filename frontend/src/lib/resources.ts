@@ -185,6 +185,10 @@ export interface FreightPoint {
   has_lift: boolean
   loaded_box_count: number
   delivered_box_count: number
+  // Bills attached to this stop, and the cartons under them. A point with
+  // no bills is a stop with nothing to drop.
+  bill_count: number
+  box_count: number
   // Four numbers, and every one is deliberate. Paid and billed differ because
   // a spare-parts run bills nothing for unloading while cash still goes out.
   // Coolie is apart from unloading because a vendor asking why unloading rose

@@ -266,9 +266,21 @@ export default function TripDetailPage() {
                   ) : null}
                   <p className="tnum mt-1 text-[12px]" style={{ color: 'var(--text-faint)' }}>
                     <Package className="mr-1 inline size-3" />
+                    {p.bill_count} bill{p.bill_count === 1 ? '' : 's'} · {p.box_count} boxes ·{' '}
                     {p.loaded_box_count} loaded · {p.delivered_box_count} delivered
                     {!p.phone ? ' · no phone, no tracking link' : ''}
                   </p>
+                  {/* The stop nobody put a bill on.
+                      A point with no bills produces no boxes, so it produces no
+                      labels — and the only place that showed up was an empty
+                      sorting sheet with nothing saying what to do about it. It
+                      is said here instead, beside the button that fixes it. */}
+                  {p.bill_count === 0 && !['BILLED', 'SETTLED', 'CANCELLED'].includes(t.status) ? (
+                    <p className="mt-1 text-[12px]" style={{ color: 'var(--warning)' }}>
+                      No bills on this stop yet — press <strong>Bills</strong> to attach them.
+                      Until then there is nothing to label and nothing to deliver here.
+                    </p>
+                  ) : null}
                   {/* Unloading and coolie are shown apart, always. Folding them
                       into one figure is precisely what makes "why has unloading
                       gone up?" unanswerable three weeks later. */}

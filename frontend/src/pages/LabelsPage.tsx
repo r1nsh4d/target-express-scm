@@ -3,6 +3,7 @@ import { Printer, ScanBarcode } from 'lucide-react'
 import type { Label } from '@/components/LabelCard'
 import { LabelCard } from '@/components/LabelCard'
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import {
   Button,
@@ -26,6 +27,7 @@ interface SortingRow {
 }
 
 export default function LabelsPage() {
+  const navigate = useNavigate()
   const [freightId, setFreightId] = useState('')
 
   const freights = useList<FreightRow>('/freights', { limit: 60 })
@@ -121,6 +123,37 @@ export default function LabelsPage() {
               ]}
             />
           </Card>
+
+          {/* Points exist, but no bills are on them.
+                 This is the dead end the screen used to leave you at: a sorting
+                 sheet of zeroes, no labels, and nothing saying why or what to
+                 do. The bills are attached on the freight itself, one stop at
+                 a time, and nothing here said so. */}
+          {!rows.length && sorting.data?.length ? (
+            <Card
+              className="px-4 py-4 text-[13px] print:hidden"
+              style={{
+                borderColor: 'color-mix(in oklab, var(--warning) 30%, transparent)',
+                background: 'color-mix(in oklab, var(--warning) 8%, var(--surface))',
+              }}
+            >
+              <p className="font-medium">No bills are on this freight yet, so there is nothing to label.</p>
+              <p className="mt-1" style={{ color: 'var(--text-muted)' }}>
+                Labels are printed from the boxes, and the boxes come from the bills. Open the
+                freight, and on each stop press <strong>Bills</strong> to attach the ones waiting
+                for that customer. If the bill does not exist yet, enter it under Consignments
+                first.
+              </p>
+              <Button
+                className="mt-3"
+                size="sm"
+                variant="secondary"
+                onClick={() => navigate(`/freights/${freightId}`)}
+              >
+                Open the freight
+              </Button>
+            </Card>
+          ) : null}
 
           {rows.length ? (
             <div>

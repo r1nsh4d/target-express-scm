@@ -107,6 +107,12 @@ class PointOut(BaseModel):
     has_lift: bool
     loaded_box_count: int
     delivered_box_count: int
+    # The bills actually attached to this stop, and the cartons under them.
+    # A point with none is a stop the lorry would visit with nothing to drop —
+    # and until this was on screen, the only place that showed up was an empty
+    # sorting sheet, with nothing saying what to do about it.
+    bill_count: int = 0
+    box_count: int = 0
     unloading_paid: Decimal
     unloading_billed: Decimal
     coolie_paid: Decimal
@@ -207,6 +213,8 @@ def _point_out(point: FreightPoint, include_tracking: bool = False) -> PointOut:
         floor_number=point.floor_number,
         has_lift=point.has_lift,
         loaded_box_count=point.loaded_box_count,
+        bill_count=len(point.consignments),
+        box_count=sum(len(c.boxes) for c in point.consignments),
         delivered_box_count=point.delivered_box_count,
         unloading_paid=point.unloading_paid,
         unloading_billed=point.unloading_billed,
