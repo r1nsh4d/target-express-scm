@@ -141,7 +141,14 @@ export default function DaySheetPage() {
         const blockers: string[] = []
         if (!billNo) blockers.push('a bill number')
         if (!boxes || boxes < 1) blockers.push('a box count')
-        if (!consigneeId && !o.newCustomerName) blockers.push('a customer')
+        // A customer nobody has entered yet is not a problem — it is the
+        // ordinary case of a new dealer, and the name read off the line is
+        // enough to create one. The only real blocker is having no name at
+        // all. (This used to require the dropdown to be actively changed,
+        // which meant a row that displayed "+ New customer: Vadakara Furniture
+        // House" as its selected option still refused to be created, with
+        // nothing on screen explaining why.)
+        if (!consigneeId && name.trim().length < 2) blockers.push('a customer name')
 
         return { line, consigneeId, name, billNo, boxes, blockers, o }
       })
@@ -533,26 +540,54 @@ function LineRow({
           onChange={(e) => onSet({ vendor_bill_no: e.target.value })}
         />
 
-        <Select
-          value={consigneeId ?? '__new__'}
-          onChange={(e) =>
-            onSet(
-              e.target.value === '__new__'
-                ? { consignee_id: null, newCustomerName: row.name }
-                : { consignee_id: e.target.value },
-            )
-          }
-        >
-          <option value="__new__">
-            + New customer: {row.o.newCustomerName ?? (line.customer_text || '—')}
-          </option>
-          {customers.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-              {c.city ? ` · ${c.city}` : ''}
-            </option>
-          ))}
-        </Select>
+        {/* A new dealer gets a text box, not a dropdown.
+            The parser's guess at a name it has never seen is exactly where it
+            is least reliable — "kozikode srvce" is a fine thing to MATCH
+            against an existing branch and a poor thing to create a customer
+            called. So the name is editable before it becomes a record, and the
+            dropdown beside it is the way back to the existing list. */}
+        {isNew ? (
+          <div className="flex min-w-0 gap-2">
+            <Input
+              value={row.o.newCustomerName ?? line.customer_text}
+              placeholder="New customer's name"
+              onChange={(e) => onSet({ newCustomerName: e.target.value })}
+              aria-label="New customer name"
+            />
+            <Select
+              className="w-[11rem] shrink-0"
+              value="__new__"
+              onChange={(e) => onSet({ consignee_id: e.target.value })}
+            >
+              <option value="__new__">New customer</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {c.city ? ` · ${c.city}` : ''}
+                </option>
+              ))}
+            </Select>
+          </div>
+        ) : (
+          <Select
+            value={consigneeId ?? '__new__'}
+            onChange={(e) =>
+              onSet(
+                e.target.value === '__new__'
+                  ? { consignee_id: null, newCustomerName: row.name }
+                  : { consignee_id: e.target.value },
+              )
+            }
+          >
+            <option value="__new__">+ New customer</option>
+            {customers.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+                {c.city ? ` · ${c.city}` : ''}
+              </option>
+            ))}
+          </Select>
+        )}
 
         <Input
           className="tnum text-center"
@@ -577,7 +612,10 @@ function LineRow({
             </span>
           ) : null}
           {isNew && !needsLook ? (
-            <span style={{ color: 'var(--accent)' }}>Will be created as a new customer</span>
+            <span style={{ color: 'var(--accent)' }}>
+              Nobody on file matches “{line.customer_text}” — this will be created as a new
+              customer. Add their address and phone later under Customers.
+            </span>
           ) : null}
           {unsure && !needsLook ? (
             <span style={{ color: 'var(--warning)' }}>

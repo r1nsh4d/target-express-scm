@@ -245,6 +245,21 @@ def commit(payload: CommitIn, db: Session = Depends(get_db), user: User = OpsDep
     consignments: list[tuple[Consignment, str]] = []
     total_boxes = 0
 
+    # New customers created during THIS sheet, by name.
+    #
+    # A new dealer with two bills is named on two lines, and without this each
+    # line created its own customer — so the dealer existed twice, the freight
+    # got two stops for one address, and the vendor was charged for two points
+    # instead of one. A billing error, not a tidiness problem.
+    #
+    # Matched on a squashed-down name so that "Vadakara Furniture House" and
+    # "vadakara  furniture house" are the same dealer, which is how the same
+    # name gets typed twice in one sitting.
+    fresh: dict[str, Consignee] = {}
+
+    def key(name: str) -> str:
+        return " ".join(name.lower().split())
+
     for row in payload.rows:
         if row.consignee_id is not None:
             consignee = db.get(Consignee, row.consignee_id)
@@ -253,6 +268,8 @@ def commit(payload: CommitIn, db: Session = Depends(get_db), user: User = OpsDep
                     status_code=404,
                     detail=f"Customer not found for bill {row.vendor_bill_no}",
                 )
+        elif key(row.new_customer.name) in fresh:
+            consignee = fresh[key(row.new_customer.name)]
         else:
             consignee = Consignee(
                 name=row.new_customer.name.strip(),
@@ -267,6 +284,7 @@ def commit(payload: CommitIn, db: Session = Depends(get_db), user: User = OpsDep
             )
             db.add(consignee)
             db.flush()
+            fresh[key(row.new_customer.name)] = consignee
             customers_created += 1
 
         consignment = Consignment(

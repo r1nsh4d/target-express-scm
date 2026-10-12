@@ -376,3 +376,183 @@ def test_the_day_sheet_needs_a_login(client, setup):
         ).status_code
         in (401, 422)
     )
+
+
+# ---------------------------------------------------------------------------
+# A customer nobody has entered yet, end to end
+# ---------------------------------------------------------------------------
+
+
+NEW_CUSTOMER_SHEET = """GDJ/8880 Rinshad Km 2
+GDJ/8881 Vadakara Furniture House 5"""
+
+
+def test_an_unknown_name_is_not_forced_onto_the_nearest_match(client, setup, auth):
+    """The failure that matters. A new dealer whose name is vaguely like an
+    existing one must not quietly inherit that customer's address — the cartons
+    would go to the wrong town."""
+    parsed = _parse(client, auth, setup, NEW_CUSTOMER_SHEET).json()
+    new_line = next(l for l in parsed["lines"] if l["vendor_bill_no"] == "GDJ/8881")
+
+    assert new_line["match"]["consignee_id"] is None
+    assert new_line["customer_text"] == "Vadakara Furniture House"
+
+
+def test_the_sheet_commits_with_a_mix_of_known_and_new(client, setup, auth):
+    """One known customer and one new one, in the same action."""
+    parsed = _parse(client, auth, setup, NEW_CUSTOMER_SHEET).json()
+
+    rows = []
+    for line in parsed["lines"]:
+        match = line["match"]
+        known = match and match["consignee_id"]
+        rows.append(
+            {
+                "vendor_bill_no": line["vendor_bill_no"],
+                "box_count": line["box_count"],
+                "consignee_id": match["consignee_id"] if known else None,
+                "new_customer": None if known else {"name": line["customer_text"]},
+            }
+        )
+
+    res = client.post(
+        "/api/daysheet/commit",
+        json={
+            "vendor_division_id": setup["division"],
+            "warehouse_id": setup["warehouse"],
+            "rows": rows,
+            "create_freight": True,
+        },
+        headers=auth,
+    )
+    assert res.status_code == 201, res.text
+
+    body = res.json()
+    assert body["consignment_count"] == 2
+    assert body["customers_created"] == 1, "only the unknown one is created"
+    assert body["stop_count"] == 2
+
+
+def test_the_new_customer_gets_a_stop_on_the_freight(client, setup, auth):
+    """Not dropped from the route for lacking an id when the sheet was typed."""
+    parsed = _parse(client, auth, setup, NEW_CUSTOMER_SHEET).json()
+    rows = [
+        {
+            "vendor_bill_no": l["vendor_bill_no"],
+            "box_count": l["box_count"],
+            "consignee_id": (l["match"]["consignee_id"] if l["match"] else None),
+            "new_customer": (
+                None
+                if (l["match"] and l["match"]["consignee_id"])
+                else {"name": l["customer_text"], "city": "Vadakara"}
+            ),
+        }
+        for l in parsed["lines"]
+    ]
+    out = client.post(
+        "/api/daysheet/commit",
+        json={
+            "vendor_division_id": setup["division"],
+            "warehouse_id": setup["warehouse"],
+            "rows": rows,
+            "create_freight": True,
+        },
+        headers=auth,
+    ).json()
+
+    freight = client.get(f"/api/freights/{out['freight_id']}", headers=auth).json()
+    names = {p["consignee_name"] for p in freight["points"]}
+    assert "Vadakara Furniture House" in names
+
+    stop = next(p for p in freight["points"] if p["consignee_name"] == "Vadakara Furniture House")
+    assert stop["bill_count"] == 1
+    assert stop["box_count"] == 5
+
+
+def test_the_new_customers_boxes_get_stickers(client, setup, auth):
+    """End to end: a dealer who did not exist when the sheet was typed has
+    printable labels by the time it is committed."""
+    parsed = _parse(client, auth, setup, NEW_CUSTOMER_SHEET).json()
+    rows = [
+        {
+            "vendor_bill_no": l["vendor_bill_no"],
+            "box_count": l["box_count"],
+            "consignee_id": (l["match"]["consignee_id"] if l["match"] else None),
+            "new_customer": (
+                None
+                if (l["match"] and l["match"]["consignee_id"])
+                else {"name": l["customer_text"]}
+            ),
+        }
+        for l in parsed["lines"]
+    ]
+    out = client.post(
+        "/api/daysheet/commit",
+        json={
+            "vendor_division_id": setup["division"],
+            "warehouse_id": setup["warehouse"],
+            "rows": rows,
+            "create_freight": True,
+        },
+        headers=auth,
+    ).json()
+
+    labels = client.get(f"/api/freights/{out['freight_id']}/labels", headers=auth).json()
+    theirs = [l for l in labels if l["consignee_name"] == "Vadakara Furniture House"]
+    assert len(theirs) == 5
+    assert all(l["point_sequence"] >= 1 for l in theirs), "a sticker that sorts nowhere"
+
+
+def test_a_corrected_name_is_what_gets_created(client, setup, auth):
+    """The parser's guess at a name it has never seen is where it is least
+    reliable, so the screen lets it be corrected first."""
+    res = client.post(
+        "/api/daysheet/commit",
+        json={
+            "vendor_division_id": setup["division"],
+            "warehouse_id": setup["warehouse"],
+            "rows": [
+                {
+                    "vendor_bill_no": "GDJ/8882",
+                    "box_count": 1,
+                    "new_customer": {"name": "Vadakara Furniture House"},
+                }
+            ],
+        },
+        headers=auth,
+    )
+    assert res.status_code == 201
+
+    names = [c["name"] for c in client.get("/api/consignees", headers=auth).json()]
+    assert "Vadakara Furniture House" in names
+
+
+def test_two_bills_for_the_same_new_customer_make_one_customer(client, setup, auth):
+    """Typing the name twice must not create the dealer twice — the second bill
+    would then be a separate stop and the vendor charged for two."""
+    res = client.post(
+        "/api/daysheet/commit",
+        json={
+            "vendor_division_id": setup["division"],
+            "warehouse_id": setup["warehouse"],
+            "rows": [
+                {
+                    "vendor_bill_no": "GDJ/8883",
+                    "box_count": 2,
+                    "new_customer": {"name": "Vadakara Furniture House"},
+                },
+                {
+                    "vendor_bill_no": "GDJ/8884",
+                    "box_count": 3,
+                    "new_customer": {"name": "Vadakara Furniture House"},
+                },
+            ],
+            "create_freight": True,
+        },
+        headers=auth,
+    )
+    assert res.status_code == 201, res.text
+
+    body = res.json()
+    assert body["customers_created"] == 1, "created the same dealer twice"
+    assert body["stop_count"] == 1, "one customer is one stop, however many bills"
