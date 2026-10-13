@@ -49,7 +49,7 @@ from app.models.fleet import (
 )
 from app.models.freight import Freight, FreightLeg, FreightPoint
 from app.models.rating import RateCard, UnloadingItemRate
-from app.models.tracking import VehiclePing
+from app.models.tracking import TrackingSession, VehiclePing
 from app.models.user import User
 from app.models.vendor import GoodsCategory, Vendor, VendorDivision, VendorWarehouse
 
@@ -521,6 +521,26 @@ def seed_freights(db: Session, masters: dict, drivers: list[Driver], consignees:
         )
         db.add(leg)
         db.flush()
+
+        # A live tracking link for every stop on the trip that is still out.
+        #
+        # Links are created at dispatch and nowhere else, and seeded trips get
+        # their status set directly rather than going through it — so a seeded
+        # system had a tracking page, a map, an estimate and a consignment
+        # note, and no way in to any of them. Only the open trip: a lorry that
+        # is back has nothing left to follow.
+        if is_open:
+            for point in db.execute(
+                select(FreightPoint).where(FreightPoint.freight_id == freight.id)
+            ).scalars():
+                db.add(
+                    TrackingSession(
+                        freight_point_id=point.id,
+                        token=secrets.token_urlsafe(24),
+                        expires_at=datetime.now() + timedelta(days=3),
+                        sent_to_phone=point.consignee.phone if point.consignee else None,
+                    )
+                )
 
         # A trail for the one trip that is still out.
         #

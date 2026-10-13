@@ -351,10 +351,20 @@ export default function TripDetailPage() {
                   {/* The link ran out. The customer's page tells them to ask
                       the sender for a new one — this is the sender's end of
                       that conversation, which previously did not exist. */}
-                  {p.tracking_expired ? (
+                  {/* No usable link, on a trip that has already left.
+                      Expired is one way to arrive here; never issued is the
+                      other — a stop whose links were cleared, or a trip whose
+                      status was moved by hand rather than through Dispatch.
+                      Both left the stop with no link AND no way to make one,
+                      which is a dead end on the single screen that can fix
+                      it. */}
+                  {!p.tracking_url &&
+                  ['DISPATCHED', 'IN_TRANSIT', 'COMPLETED'].includes(t.status) ? (
                     <div className="mt-1">
                       <p className="text-[12px]" style={{ color: 'var(--warning)' }}>
-                        The tracking link for this stop has expired.
+                        {p.tracking_expired
+                          ? 'The tracking link for this stop has expired.'
+                          : 'This stop has no tracking link yet.'}
                       </p>
                       <button
                         type="button"
@@ -366,7 +376,7 @@ export default function TripDetailPage() {
                           reissue.mutate(p.id)
                         }}
                       >
-                        Issue a new link
+                        {p.tracking_expired ? 'Issue a new link' : 'Create a tracking link'}
                       </button>
                     </div>
                   ) : null}

@@ -391,3 +391,51 @@ def test_the_note_is_refused_with_the_link(client, dispatched, auth):
     """It is not a separate door. An expired link takes the note with it."""
     _expire(dispatched["token"])
     assert client.get(f"/api/track/{dispatched['token']}").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# A stop that has no link at all
+# ---------------------------------------------------------------------------
+
+
+def test_a_dispatched_stop_with_no_session_reports_neither_link_nor_expiry(
+    client, dispatched, auth
+):
+    """The dead end. Links are created at dispatch and nowhere else, so a stop
+    whose links were cleared — or a trip whose status was moved by hand — had
+    no link and nothing saying one could be made. The screen keys off
+    tracking_url being absent, so both facts have to be truthful."""
+    from app.db.session import SessionLocal
+    from app.models.tracking import TrackingSession
+    from sqlalchemy import delete
+
+    db = SessionLocal()
+    db.execute(delete(TrackingSession))
+    db.commit()
+    db.close()
+
+    point = client.get(f"/api/freights/{dispatched['freight']}", headers=auth).json()["points"][0]
+    assert point["tracking_url"] is None
+    assert point["tracking_expired"] is False, "never issued is not the same as expired"
+
+
+def test_a_link_can_be_created_for_a_stop_that_never_had_one(client, dispatched, auth):
+    """And the way out works, not just the way out of an EXPIRED link."""
+    from app.db.session import SessionLocal
+    from app.models.tracking import TrackingSession
+    from sqlalchemy import delete
+
+    db = SessionLocal()
+    db.execute(delete(TrackingSession))
+    db.commit()
+    db.close()
+
+    res = client.post(
+        f"/api/freights/{dispatched['freight']}/points/{dispatched['point']}/tracking-link",
+        headers=auth,
+    )
+    assert res.status_code == 200, res.text
+
+    url = res.json()["points"][0]["tracking_url"]
+    assert url
+    assert client.get(f"/api/track/{url.rsplit('/', 1)[-1]}").status_code == 200

@@ -520,3 +520,48 @@ def test_seed_leaves_the_open_trip_with_a_position(client):
             ).scalars().all()
     finally:
         db.close()
+
+
+def test_seed_leaves_the_open_trip_with_links_that_open(client):
+    """A seeded system had a tracking page, a map, an estimate and a
+    consignment note, and no way in to any of them — links are created at
+    dispatch and a seeded trip never goes through it."""
+    from app.db.session import SessionLocal
+    from app.models.enums import FreightStatus
+    from app.models.freight import Freight, FreightPoint
+    from app.models.tracking import TrackingSession
+    from sqlalchemy import select
+
+    from app import seed
+
+    db = SessionLocal()
+    try:
+        users = seed.seed_users(db)
+        masters = seed.seed_masters(db)
+        drivers = seed.seed_drivers(db, users, masters["vehicles"])
+        consignees = seed.seed_consignees(db)
+        seed.seed_freights(db, masters, drivers, consignees)
+        db.commit()
+
+        open_trip = db.execute(
+            select(Freight).where(Freight.status == FreightStatus.IN_TRANSIT)
+        ).scalars().first()
+        assert open_trip is not None
+
+        points = db.execute(
+            select(FreightPoint).where(FreightPoint.freight_id == open_trip.id)
+        ).scalars().all()
+        tokens = [
+            row.token
+            for row in db.execute(
+                select(TrackingSession).where(
+                    TrackingSession.freight_point_id.in_([p.id for p in points])
+                )
+            ).scalars()
+        ]
+    finally:
+        db.close()
+
+    assert len(tokens) == len(points), "not every stop on the open trip got a link"
+    for token in tokens:
+        assert client.get(f"/api/track/{token}").status_code == 200, "a seeded link is dead"
