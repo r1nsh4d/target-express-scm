@@ -478,6 +478,26 @@
     animation: tx-shimmer 1.6s linear infinite;
   }
 
+  /* --- maps ---------------------------------------------------------------- */
+
+  /* Keep Leaflet's stacking to itself.
+     Leaflet gives its own panes z-index 400 and 500, and those are not small
+     numbers next to anything else on the page — a dialog at z-50 lost to them,
+     and the map painted straight through a consignment note that was supposed
+     to be on top of it.
+
+     `isolation` rather than the usual `position: relative; z-index: 0`:
+     Leaflet's stylesheet never positions .leaflet-container, so a z-index on
+     it has nothing to act on and does nothing at all. isolation makes a
+     stacking context on its own terms, without touching layout or the
+     containing block the panes are placed against. The 400s are then contained
+     and the whole map competes as one layer, which is what every other element
+     on the page already assumes it is doing. */
+  .leaflet-container {
+    isolation: isolate;
+    z-index: 0;
+  }
+
   /* --- the day sheet reading a line -------------------------------------- */
 
   /* A beam that crosses the panel while the server is reading what was typed.
