@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  FileText,
+  Printer,
   CheckCircle2,
   MapPin,
   Package,
@@ -8,8 +10,11 @@ import {
   Truck,
 } from 'lucide-react'
 import { Suspense, lazy, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams } from 'react-router-dom'
 
+import { ConsignmentNote } from '@/components/ConsignmentNote'
+import { BRAND } from '@/lib/brand'
 import { Button, Card, ErrorNote, Spinner } from '@/components/ui'
 import { api, apiErrorMessage } from '@/lib/api'
 
@@ -51,6 +56,15 @@ interface Tracking {
   vehicle_position: { latitude: number; longitude: number; recorded_at: string } | null
   distance_km: number | null
   eta_minutes: number | null
+  lr_no: string | null
+  trip_no: string | null
+  trip_date: string | null
+  vendor_name: string | null
+  from_warehouse: string | null
+  from_address: string | null
+  vehicle_no: string | null
+  driver_name: string | null
+  consignee_phone: string | null
   driver_phone: string | null
   delivery_photo_url: string | null
   receiver_name: string | null
@@ -60,6 +74,7 @@ export default function TrackPage() {
   const { token } = useParams<{ token: string }>()
   const queryClient = useQueryClient()
   const [fixing, setFixing] = useState(false)
+  const [showNote, setShowNote] = useState(false)
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -131,7 +146,16 @@ export default function TrackPage() {
             >
               {delivered ? <PackageCheck className="size-5" /> : <Truck className="size-5" />}
             </span>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
+              {data.lr_no ? (
+                <p
+                  className="text-[10px] tracking-[0.14em] uppercase"
+                  style={{ color: 'var(--text-faint)' }}
+                >
+                  LR {data.lr_no}
+                  {data.trip_no ? ` · ${data.trip_no}` : ''}
+                </p>
+              ) : null}
               <p className="text-[17px] font-semibold">{data.consignee_name}</p>
               <p className="mt-0.5 text-[13.5px]" style={{ color: 'var(--text-muted)' }}>
                 {delivered
@@ -214,12 +238,40 @@ export default function TrackPage() {
             </div>
           ) : null}
 
-          {data.driver_phone && !delivered ? (
-            <a href={`tel:${data.driver_phone}`} className="mt-4 block">
-              <Button variant="secondary" className="w-full" icon={<Phone className="size-4" />}>
-                Call the driver
-              </Button>
-            </a>
+          {/* Who is bringing it, and on what.
+              A name and a number plate is what turns "a lorry is coming" into
+              something a person can look out for, and it is the first thing
+              every delivery app shows. */}
+          {!delivered && (data.driver_name || data.vehicle_no) ? (
+            <div
+              className="mt-4 flex items-center gap-3 rounded-[var(--radius-control)] px-3.5 py-3"
+              style={{ background: 'var(--bg-elevated)' }}
+            >
+              <span
+                className="grid size-9 shrink-0 place-items-center rounded-full text-[13px] font-semibold"
+                style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}
+              >
+                {(data.driver_name ?? '?').slice(0, 1).toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13.5px] font-medium">{data.driver_name ?? 'Driver'}</p>
+                {data.vehicle_no ? (
+                  <p className="tnum text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                    {data.vehicle_no}
+                  </p>
+                ) : null}
+              </div>
+              {data.driver_phone ? (
+                <a
+                  href={`tel:${data.driver_phone}`}
+                  className="grid size-9 shrink-0 place-items-center rounded-full no-underline"
+                  style={{ background: 'var(--accent)', color: '#04121a' }}
+                  aria-label="Call the driver"
+                >
+                  <Phone className="size-4" />
+                </a>
+              ) : null}
+            </div>
           ) : null}
         </Card>
 
@@ -256,6 +308,30 @@ export default function TrackPage() {
               {data.box_count} boxes are on their way.
             </p>
           )}
+        </Card>
+
+        {/* The consignment note.
+            The LR is the document that travels with the goods, and until now
+            the customer had no way to get their part of it — they had a page
+            that disappears after three days and nothing to keep. A dealer
+            asked by their own accounts what arrived, when and on whose lorry
+            had nothing to show. */}
+        <Card className="px-5 py-4 print:hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-[14px] font-semibold">Consignment note</h2>
+              <p className="mt-0.5 text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+                Your copy of the LR, to keep or forward.
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              icon={<FileText className="size-4" />}
+              onClick={() => setShowNote(true)}
+            >
+              View &amp; save
+            </Button>
+          </div>
         </Card>
 
         {delivered && data.delivery_photo_url ? (
@@ -328,6 +404,59 @@ export default function TrackPage() {
           </Card>
         ) : null}
       </div>
+
+      {/* Shown over the page rather than on it. A consignment note is a
+          document, and a document competing for space with a live tracking
+          card is neither. Printing from here gives the note alone — the
+          browser's own "Save as PDF" is the download, which needs no library
+          and produces a file every accounts department already knows. */}
+      {/* On document.body, not here.
+          The print stylesheet hides `main` in order to print a sheet's
+          contents alone, and this overlay sits inside `main` — left where it
+          is written, printing it would give a blank page. */}
+      {showNote
+        ? createPortal(
+        <div
+          className="tx-print-sheet fixed inset-0 z-50 overflow-y-auto"
+          style={{ background: 'rgba(2,4,8,0.85)' }}
+        >
+          <div className="mx-auto w-full max-w-[760px] px-4 py-6">
+            <div className="tx-modal-head mb-3 flex items-center justify-between gap-3">
+              <Button variant="secondary" onClick={() => setShowNote(false)}>
+                Close
+              </Button>
+              <Button icon={<Printer className="size-4" />} onClick={() => window.print()}>
+                Print / Save as PDF
+              </Button>
+            </div>
+            <div className="tx-modal-body">
+              <ConsignmentNote
+                note={{
+                  lr_no: data.lr_no,
+                  trip_no: data.trip_no,
+                  trip_date: data.trip_date,
+                  vendor_name: data.vendor_name,
+                  from_warehouse: data.from_warehouse,
+                  from_address: data.from_address,
+                  vehicle_no: data.vehicle_no,
+                  driver_name: data.driver_name,
+                  consignee_name: data.consignee_name,
+                  consignee_phone: data.consignee_phone,
+                  address: data.address,
+                  box_count: data.box_count,
+                  boxes: data.boxes,
+                  status: data.status,
+                  delivered_at: data.delivered_at,
+                  receiver_name: data.receiver_name,
+                }}
+                trackUrl={window.location.href}
+              />
+            </div>
+          </div>
+        </div>,
+            document.body,
+          )
+        : null}
     </Shell>
   )
 }
@@ -349,13 +478,13 @@ function Shell({ children }: { children: React.ReactNode }) {
               className="text-[12.5px] font-semibold italic tracking-[0.08em] uppercase"
               style={{ color: 'var(--rail-text)' }}
             >
-              Target Express
+              {BRAND.name}
             </p>
             <p
               className="mt-[3px] text-[9px] tracking-[0.2em] uppercase"
               style={{ color: 'var(--rail-faint)' }}
             >
-              Logistics to connect world
+              {BRAND.tagline}
             </p>
           </div>
         </div>

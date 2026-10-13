@@ -8,7 +8,7 @@ was sent to already knows.
 """
 
 import math
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -63,6 +63,23 @@ class TrackingOut(BaseModel):
     latitude: float | None
     longitude: float | None
     can_update_location: bool
+
+    # --- what a consignment note needs ----------------------------------- #
+    #
+    # The LR is the document that travels with the goods, and the customer is
+    # entitled to a copy of their part of it: which lorry, from where, under
+    # which LR number, carrying which cartons. Everything here is about THEIR
+    # delivery — the other stops on the run are none of their business and are
+    # not sent.
+    lr_no: str | None = None
+    trip_no: str | None = None
+    trip_date: date | None = None
+    vendor_name: str | None = None
+    from_warehouse: str | None = None
+    from_address: str | None = None
+    vehicle_no: str | None = None
+    driver_name: str | None = None
+    consignee_phone: str | None = None
 
     vehicle_position: VehiclePositionOut | None
     # How far the lorry still has to come, and roughly how long that takes.
@@ -238,7 +255,23 @@ def track(token: str, db: Session = Depends(get_db)) -> TrackingOut:
 
     db.commit()
 
+    leg_any = freight.legs[-1] if freight.legs else None
+    warehouse = freight.warehouse
+
     return TrackingOut(
+        lr_no=freight.lr_no,
+        trip_no=freight.trip_no,
+        trip_date=freight.trip_date,
+        vendor_name=(
+            freight.vendor_division.vendor.name
+            if freight.vendor_division and freight.vendor_division.vendor
+            else None
+        ),
+        from_warehouse=warehouse.name if warehouse else None,
+        from_address=warehouse.address if warehouse else None,
+        vehicle_no=leg_any.vehicle.registration_no if leg_any and leg_any.vehicle else None,
+        driver_name=leg_any.driver.name if leg_any and leg_any.driver else None,
+        consignee_phone=point.consignee.phone,
         consignee_name=point.consignee.name,
         address=point.address_snapshot or point.consignee.address,
         status=point.status,

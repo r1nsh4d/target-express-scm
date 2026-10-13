@@ -338,3 +338,56 @@ def test_an_aware_expiry_in_the_past_is_still_refused(client, dispatched, auth):
     point = client.get(f"/api/freights/{dispatched['freight']}", headers=auth).json()["points"][0]
     assert point["tracking_url"] is None
     assert point["tracking_expired"] is True
+
+
+# ---------------------------------------------------------------------------
+# The consignment note
+# ---------------------------------------------------------------------------
+
+
+def test_the_note_carries_what_an_lr_needs(client, dispatched, auth):
+    """The LR travels with the goods and the consignee is entitled to their
+    part of it: which lorry, from where, under which number."""
+    body = client.get(f"/api/track/{dispatched['token']}").json()
+
+    assert body["lr_no"] == "901"
+    assert body["trip_no"] == "Y26007001"
+    assert body["trip_date"]
+    assert body["vendor_name"] == "Godrej"
+    assert body["from_warehouse"] == "Kochi godown"
+    assert body["vehicle_no"] == "KL07CW3317"
+    assert body["driver_name"] == "Rajesh K"
+    assert body["consignee_name"] == "Anand Agencies"
+
+
+def test_the_note_says_nothing_about_the_rest_of_the_run(client, dispatched, auth):
+    """A consignee's copy that leaked the other stops would be worse than no
+    copy at all — it tells one customer where a competitor's goods are going
+    and what the lorry is carrying for them."""
+    from app.db.session import SessionLocal
+    from app.models.consignee import Consignee
+    from app.models.enums import ConsigneeType, GeoConfidence
+    from app.models.freight import FreightPoint
+
+    db = SessionLocal()
+    rival = Consignee(
+        name="Somebody Elses Shop",
+        type=ConsigneeType.RETAIL_CUSTOMER,
+        city="Kozhikode",
+        geo_confidence=GeoConfidence.UNVERIFIED,
+    )
+    db.add(rival)
+    db.flush()
+    db.add(FreightPoint(freight_id=dispatched["freight"], sequence=2, consignee_id=rival.id))
+    db.commit()
+    db.close()
+
+    raw = client.get(f"/api/track/{dispatched['token']}").text
+    assert "Somebody Elses Shop" not in raw
+    assert "Kozhikode" not in raw
+
+
+def test_the_note_is_refused_with_the_link(client, dispatched, auth):
+    """It is not a separate door. An expired link takes the note with it."""
+    _expire(dispatched["token"])
+    assert client.get(f"/api/track/{dispatched['token']}").status_code == 404
