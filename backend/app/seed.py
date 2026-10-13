@@ -13,6 +13,7 @@ Run with:  python -m app.seed
 
 from __future__ import annotations
 
+import secrets
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -22,8 +23,11 @@ from sqlalchemy.orm import Session
 from app.core.security import hash_password
 from app.db.session import SessionLocal
 from app.models.consignee import Consignee
+from app.models.consignment import Box, Consignment
 from app.models.enums import (
+    BoxStatus,
     ConsigneeType,
+    ConsignmentStatus,
     DriverEngagement,
     FreightPointStatus,
     FreightStatus,
@@ -450,21 +454,56 @@ def seed_freights(db: Session, masters: dict, drivers: list[Driver], consignees:
         for i in range(point_count):
             consignee = picked[i % len(picked)]
             delivered = status == FreightStatus.COMPLETED
-            db.add(
-                FreightPoint(
-                    freight_id=freight.id,
-                    sequence=i + 1,
-                    consignee_id=consignee.id,
-                    address_snapshot=consignee.address,
-                    latitude=consignee.latitude,
-                    longitude=consignee.longitude,
-                    loaded_box_count=4,
-                    delivered_box_count=4 if delivered else 0,
-                    status=(
-                        FreightPointStatus.DELIVERED if delivered else FreightPointStatus.LOADED
-                    ),
-                )
+            point = FreightPoint(
+                freight_id=freight.id,
+                sequence=i + 1,
+                consignee_id=consignee.id,
+                address_snapshot=consignee.address,
+                latitude=consignee.latitude,
+                longitude=consignee.longitude,
+                loaded_box_count=4,
+                delivered_box_count=4 if delivered else 0,
+                status=(
+                    FreightPointStatus.DELIVERED if delivered else FreightPointStatus.LOADED
+                ),
             )
+            db.add(point)
+            db.flush()
+
+            # A bill behind the boxes, which there has to be.
+            #
+            # Without this a seeded freight claimed four cartons loaded at every
+            # stop with nothing underneath — so the stop showed "0 bills · 0
+            # boxes · 4 loaded", Sorting & labels had nothing to print, and the
+            # screen told the user to press a Bills button that a dispatched
+            # trip does not have. A loaded count with no bill behind it is not a
+            # state the application can otherwise reach, so seeding one taught
+            # people the system was broken.
+            consignment = Consignment(
+                vendor_division_id=spare.id,
+                warehouse_id=warehouse.id,
+                consignee_id=consignee.id,
+                freight_point_id=point.id,
+                vendor_bill_no=f"{trip_no[-4:]}/{i + 1:02d}",
+                bill_date=trip_date,
+                declared_box_count=4,
+                status=ConsignmentStatus.RECEIVED,
+            )
+            db.add(consignment)
+            db.flush()
+
+            token = secrets.token_hex(3).upper()
+            for n in range(1, 5):
+                db.add(
+                    Box(
+                        consignment_id=consignment.id,
+                        item_no=n,
+                        barcode=f"TE-{token}-{n:03d}",
+                        status=(
+                            BoxStatus.DELIVERED if delivered else BoxStatus.LOADED
+                        ),
+                    )
+                )
 
         is_open = status == FreightStatus.IN_TRANSIT
         db.add(

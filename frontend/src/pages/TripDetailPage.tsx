@@ -285,10 +285,29 @@ export default function TripDetailPage() {
                       labels — and the only place that showed up was an empty
                       sorting sheet with nothing saying what to do about it. It
                       is said here instead, beside the button that fixes it. */}
+                  {/* The advice has to match the buttons actually on screen.
+                      Bills can only be attached before dispatch, so on a trip
+                      that has already left, "press Bills" points at a button
+                      that is not there — which reads as the screen being
+                      broken rather than the trip being past the point of
+                      changing. */}
                   {p.bill_count === 0 && !['BILLED', 'SETTLED', 'CANCELLED'].includes(t.status) ? (
                     <p className="mt-1 text-[12px]" style={{ color: 'var(--warning)' }}>
-                      No bills on this stop yet — press <strong>Bills</strong> to attach them.
-                      Until then there is nothing to label and nothing to deliver here.
+                      {['DRAFT', 'PLANNED', 'LOADING'].includes(t.status) ? (
+                        <>
+                          No bills on this stop yet — press <strong>Bills</strong> to attach them.
+                          Until then there is nothing to label and nothing to deliver here.
+                        </>
+                      ) : (
+                        <>
+                          No bills were attached to this stop before the trip left
+                          {p.loaded_box_count > 0
+                            ? `, though ${p.loaded_box_count} boxes were counted onto the vehicle`
+                            : ''}
+                          . Bills cannot be added once a trip is dispatched — the driver can still
+                          record the delivery, and the stop still counts for billing.
+                        </>
+                      )}
                     </p>
                   ) : null}
                   {/* Unloading and coolie are shown apart, always. Folding them
