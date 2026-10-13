@@ -478,6 +478,58 @@
     animation: tx-shimmer 1.6s linear infinite;
   }
 
+  /* --- the day sheet reading a line -------------------------------------- */
+
+  /* A beam that crosses the panel while the server is reading what was typed.
+     It is doing a real job: the parse is debounced by 400ms and then takes a
+     moment, and without a sign that anything is happening people type, wait,
+     and type the line again. A spinner would say "loading"; this says
+     "reading", which is what it is. */
+  .tx-scan {
+    position: relative;
+    overflow: hidden;
+  }
+  .tx-scan::after {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 36%;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in oklab, var(--accent) 16%, transparent) 50%,
+      transparent 100%
+    );
+    animation: tx-sweep 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+
+  @keyframes tx-sweep {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(378%);
+    }
+  }
+
+  /* The edge of a parsed row, coloured by how sure the match was. Thin, on the
+     leading edge, so thirty rows read as one column of confidence that can be
+     scanned down in a second — the one amber line in a page of cyan is found
+     without reading a word. */
+  .tx-edge {
+    position: relative;
+  }
+  .tx-edge::before {
+    content: '';
+    position: absolute;
+    inset: 6px auto 6px 0;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--tx-edge-colour, var(--accent));
+    opacity: var(--tx-edge-strength, 0.9);
+  }
+
   /* --- backdrops --------------------------------------------------------- */
 
   /* The field behind the hero, the login and the tracking page: two slow
@@ -671,6 +723,11 @@
   /* One switch for the whole system. Everything still arrives at its final
      state; it just arrives immediately. */
   @media (prefers-reduced-motion: reduce) {
+    .tx-scan::after {
+      animation: none;
+      opacity: 0;
+    }
+
     *,
     *::before,
     *::after {

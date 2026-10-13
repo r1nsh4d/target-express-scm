@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom'
 import { Button, Card, ErrorNote, Input, Select, Spinner, Textarea } from '@/components/ui'
 import { api, apiErrorMessage } from '@/lib/api'
 import type { Consignee, VendorDivision, Warehouse } from '@/lib/resources'
+import { useCountUp, stagger } from '@/lib/motion'
 import { useList } from '@/lib/resources'
 
 /* The whole morning on one screen.
@@ -218,6 +219,13 @@ export default function DaySheetPage() {
     onError: (e) => setError(apiErrorMessage(e)),
   })
 
+  /* Counted up rather than snapping. The numbers change as a sheet is typed,
+     and a figure that climbs is read as a figure that is being worked out —
+     which it is. */
+  const billsUp = useCountUp(rows.length)
+  const boxesUp = useCountUp(totalBoxes)
+  const stopsUp = useCountUp(stops.length)
+
   const missingSetup = !divisionId || !warehouseId
   const canCommit = ready && !missingSetup
 
@@ -225,6 +233,34 @@ export default function DaySheetPage() {
     /* Room at the bottom for the pinned action bar, so the last row is never
        hidden behind it. */
     <div className="space-y-5">
+      {/* A line that says what the screen is doing.
+          The parse is debounced and then takes a moment, and without a sign
+          that anything is happening people type, wait, and type the line
+          again. */}
+      <div className="flex flex-wrap items-center gap-2.5">
+        {doParse.isPending ? (
+          <>
+            <span className="live-dot" aria-hidden />
+            <span className="text-[13px]" style={{ color: 'var(--accent)' }}>
+              Reading the sheet&hellip;
+            </span>
+          </>
+        ) : rows.length ? (
+          <>
+            <Check className="size-4" style={{ color: ready ? 'var(--success)' : 'var(--warning)' }} />
+            <span className="tnum text-[13px]" style={{ color: 'var(--text-muted)' }}>
+              <strong style={{ color: 'var(--text)' }}>{billsUp}</strong> bills ·{' '}
+              <strong style={{ color: 'var(--text)' }}>{boxesUp}</strong> boxes ·{' '}
+              <strong style={{ color: 'var(--text)' }}>{stopsUp}</strong> stops
+            </span>
+          </>
+        ) : (
+          <span className="text-[13px]" style={{ color: 'var(--text-faint)' }}>
+            Type the day&rsquo;s bills below and they are read as you go.
+          </span>
+        )}
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-3">
         <Compact label="Vendor division">
           <Select
@@ -280,6 +316,7 @@ export default function DaySheetPage() {
               </button>
             ) : null}
           </div>
+          <div className={doParse.isPending ? 'tx-scan rounded-[var(--radius-control)]' : ''}>
           <Textarea
             rows={14}
             className="font-mono text-[13px] leading-relaxed"
@@ -288,6 +325,7 @@ export default function DaySheetPage() {
             onChange={(e) => setText(e.target.value)}
             spellCheck={false}
           />
+          </div>
           <p className="mt-2 text-[12px] leading-relaxed" style={{ color: 'var(--text-faint)' }}>
             <Wand2 className="mr-1 inline size-3" />
             Bill number, customer and box count, in any order. Misspelt names are matched to the
@@ -301,9 +339,10 @@ export default function DaySheetPage() {
               <Spinner className="size-5" />
             </div>
           ) : !parsed || !rows.length ? (
-            <Card className="flex min-h-[14rem] items-center justify-center p-6 text-center">
-              <div>
-                <Wand2 className="mx-auto mb-2 size-6" style={{ color: 'var(--text-faint)' }} />
+            <Card className="relative flex min-h-[14rem] items-center justify-center overflow-hidden p-6 text-center">
+              <span className="grid-field" aria-hidden />
+              <div className="relative">
+                <Wand2 className="mx-auto mb-2 size-6" style={{ color: 'var(--accent)' }} />
                 <p className="text-[13.5px] font-medium">Nothing read yet</p>
                 <p className="mt-1 text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
                   What you type on the left appears here, bill by bill, before anything is
@@ -324,10 +363,11 @@ export default function DaySheetPage() {
                 <span />
               </div>
 
-              {rows.map((r) => (
+              {rows.map((r, i) => (
                 <LineRow
                   key={r.line.line_no}
                   row={r}
+                  index={i}
                   customers={consignees.data ?? []}
                   onSet={(patch) => set(r.line.line_no, patch)}
                 />
@@ -394,9 +434,15 @@ export default function DaySheetPage() {
            short of the right-hand edge. Sticky stays in normal flow and is
            unaffected. */
         <div
-          className="sticky bottom-0 z-20 -mx-1 rounded-t-[var(--radius-card)] border-t backdrop-blur-md"
+          /* Lit when the sheet is ready, so the moment it becomes committable
+             is visible without reading the count. */
+          className={`sticky bottom-0 z-20 -mx-1 rounded-t-[var(--radius-card)] border-t backdrop-blur-md${
+            canCommit ? ' lit' : ''
+          }`}
           style={{
-            borderColor: 'var(--border)',
+            borderColor: canCommit
+              ? 'color-mix(in oklab, var(--accent) 30%, transparent)'
+              : 'var(--border)',
             background: 'color-mix(in oklab, var(--surface-solid) 92%, transparent)',
           }}
         >
@@ -408,8 +454,8 @@ export default function DaySheetPage() {
                 <CircleAlert className="size-4 shrink-0" style={{ color: 'var(--warning)' }} />
               )}
               <span className="tnum text-[13.5px] font-medium">
-                {rows.length} bill{rows.length === 1 ? '' : 's'} · {totalBoxes} boxes
-                {makeFreight ? ` · ${stops.length} stop${stops.length === 1 ? '' : 's'}` : ''}
+                {billsUp} bill{rows.length === 1 ? '' : 's'} · {boxesUp} boxes
+                {makeFreight ? ` · ${stopsUp} stop${stops.length === 1 ? '' : 's'}` : ''}
               </span>
             </div>
 
@@ -500,6 +546,7 @@ function IconBtn({
  * a person. */
 function LineRow({
   row,
+  index,
   customers,
   onSet,
 }: {
@@ -512,18 +559,36 @@ function LineRow({
     blockers: string[]
     o: Override
   }
+  index: number
   customers: Consignee[]
   onSet: (patch: Override) => void
 }) {
   const { line, consigneeId, billNo, boxes, blockers } = row
-  const unsure = !!line.match?.consignee_id && line.match.score < 0.86
+  const score = line.match?.score ?? 0
+  const unsure = !!line.match?.consignee_id && score < 0.86
   const isNew = !consigneeId
   const needsLook = blockers.length > 0
 
+  /* The leading edge, coloured by how the line was read.
+     Thin and on the left, so thirty rows become one column of confidence that
+     can be scanned down in a second — the one amber line in a page of cyan is
+     found without reading a word. Its strength follows the match score, so a
+     94% match is visibly firmer than a 71% one without a number being read. */
+  const edge = needsLook
+    ? { colour: 'var(--warning)', strength: 1 }
+    : isNew
+      ? { colour: 'var(--accent-2)', strength: 0.9 }
+      : unsure
+        ? { colour: 'var(--warning)', strength: 0.85 }
+        : { colour: 'var(--success)', strength: Math.max(0.45, score) }
+
   return (
     <div
-      className="rounded-[10px] border px-2 py-2"
+      className="tx-edge tx-in hoverable rounded-[10px] border py-2 pr-2 pl-3.5"
       style={{
+        ...stagger(index, 35, 240),
+        ['--tx-edge-colour' as string]: edge.colour,
+        ['--tx-edge-strength' as string]: String(edge.strength),
         borderColor: needsLook
           ? 'color-mix(in oklab, var(--warning) 45%, transparent)'
           : 'var(--border)',
