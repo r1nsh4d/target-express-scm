@@ -1,4 +1,4 @@
-import { Package, Plus, Printer, ScanBarcode } from 'lucide-react'
+import { Package, Plus, Printer, ScanBarcode, X } from 'lucide-react'
 import { useCallback, useState } from 'react'
 
 import type { Label } from '@/components/LabelCard'
@@ -90,11 +90,17 @@ export default function ConsignmentsPage() {
             </Select>
           </Field>
         </div>
+        {/* A toggle, and it has to look like one that is ON.
+            Lit, it reads as a button somebody might press rather than a filter
+            already applied — which is how a full list comes up empty and
+            everybody concludes the data is gone. So it says it is filtering,
+            and carries the cross that turns it off. */}
         <Button
           variant={unassignedOnly ? 'primary' : 'secondary'}
+          icon={unassignedOnly ? <X className="size-4" /> : undefined}
           onClick={() => setUnassignedOnly((v) => !v)}
         >
-          Not yet on a freight
+          {unassignedOnly ? 'Showing only unassigned' : 'Not yet on a freight'}
         </Button>
       </div>
 
@@ -111,11 +117,35 @@ export default function ConsignmentsPage() {
             empty={
               <EmptyState
                 icon={<Package className="size-7" />}
-                title="No consignments"
+                title={
+                  unassignedOnly
+                    ? 'Every bill is already on a freight'
+                    : division
+                      ? 'No bills for this division'
+                      : 'No consignments'
+                }
                 description={
-                  divisions.data?.length
-                    ? "Enter the day's bills here, then group them onto a freight."
-                    : 'Create a vendor and a division first.'
+                  /* An empty list caused by a filter is not the same as an
+                     empty database, and saying "no consignments" when there
+                     are plenty is how somebody concludes their data is gone. */
+                  unassignedOnly
+                    ? 'Nothing is waiting to be assigned. Turn off the filter above to see them all.'
+                    : division
+                      ? 'Try All divisions, or enter the day’s bills for this one.'
+                      : divisions.data?.length
+                        ? "Enter the day's bills here, then group them onto a freight."
+                        : 'Create a vendor and a division first.'
+                }
+                action={
+                  unassignedOnly ? (
+                    <Button variant="secondary" onClick={() => setUnassignedOnly(false)}>
+                      Show all bills
+                    </Button>
+                  ) : division ? (
+                    <Button variant="secondary" onClick={() => setDivision('')}>
+                      Show all divisions
+                    </Button>
+                  ) : undefined
                 }
               />
             }

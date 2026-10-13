@@ -78,9 +78,30 @@ export default function TripsPage() {
             empty={
               <EmptyState
                 icon={<Route className="size-7" />}
-                title="No trips yet"
-                description="Build one from a vendor division, a warehouse and the points it will serve."
-                action={<Button onClick={() => setOpen(true)}>New trip</Button>}
+                /* An empty list caused by a filter is not an empty database.
+                   "No trips yet" on a system with forty of them is how
+                   somebody concludes their data has gone — and the offer of a
+                   New trip button makes it worse, because building one is not
+                   what is needed. */
+                title={
+                  statusFilter
+                    ? `No ${statusFilter.replace('_', ' ').toLowerCase()} trips`
+                    : 'No trips yet'
+                }
+                description={
+                  statusFilter
+                    ? 'There are none at this status. Clear the filter to see the rest.'
+                    : 'Build one from a vendor division, a warehouse and the points it will serve.'
+                }
+                action={
+                  statusFilter ? (
+                    <Button variant="secondary" onClick={() => setStatusFilter('')}>
+                      Show all trips
+                    </Button>
+                  ) : (
+                    <Button onClick={() => setOpen(true)}>New trip</Button>
+                  )
+                }
               />
             }
             columns={[
