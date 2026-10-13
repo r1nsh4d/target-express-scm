@@ -1,6 +1,8 @@
 import { Plus, ReceiptIndianRupee } from 'lucide-react'
 import { useState } from 'react'
 
+import { Link } from 'react-router-dom'
+
 import {
   Badge,
   Button,
@@ -34,7 +36,7 @@ export default function RateCardsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        description="Rates are never edited — that is why there is no edit button here. To change one, add a card dated from the change: freights before it keep their original price, so old invoices re-print unchanged. Retiring a card stops it applying to new freights without touching anything it has already priced."
+        description="What a vendor division is charged per trip: the base, the distance and the points. Unloading is only named here — what it costs per article, and what the driver is paid for carrying it, is set under Unloading rates. Rates are never edited, which is why there is no edit button: to change one, add a card dated from the change, so freights before it keep their original price and old invoices re-print unchanged."
         action={
           <Button
             icon={<Plus className="size-4" />}
@@ -119,11 +121,25 @@ export default function RateCardsPage() {
               {
                 key: 'unloading',
                 header: 'Unloading',
-                render: (c) => (
-                  <Badge tone={c.unloading_basis === 'NOT_APPLICABLE' ? 'neutral' : 'info'}>
-                    {c.unloading_basis.replaceAll('_', ' ').toLowerCase()}
-                  </Badge>
-                ),
+                /* The basis only, because that is all a rate card holds. The
+                   figures — what the vendor is charged per article and what
+                   the driver is paid for carrying it — live on Unloading
+                   rates, and a column that names a basis without saying where
+                   to set it sends people hunting. */
+                render: (c) =>
+                  c.unloading_basis === 'NOT_APPLICABLE' ? (
+                    <Badge tone="neutral">not charged</Badge>
+                  ) : (
+                    <Link
+                      to="/unloading-rates"
+                      className="inline-flex items-center gap-1.5 no-underline"
+                    >
+                      <Badge tone="info">{c.unloading_basis.replaceAll('_', ' ').toLowerCase()}</Badge>
+                      <span className="text-[11px]" style={{ color: 'var(--accent)' }}>
+                        rates &rarr;
+                      </span>
+                    </Link>
+                  ),
               },
                           {
                 key: 'actions',

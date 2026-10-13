@@ -52,7 +52,7 @@ export default function UnloadingRatesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        description="Furniture is not unloaded by the box. A chair, a wardrobe and a mattress are different work — and carrying any of them up four floors is different work again. Each article gets a ground-floor rate plus a charge for every floor above it."
+        description="Two prices for the same article: what the vendor is charged, and what the driver is paid for carrying it. The difference is what Target Express keeps on unloading. Furniture is not unloaded by the box — a chair, a wardrobe and a mattress are different work, and carrying any of them up four floors is different work again — so each article has a ground-floor rate plus a charge per floor, on both sides."
         action={
           <Button
             icon={<Plus className="size-4" />}

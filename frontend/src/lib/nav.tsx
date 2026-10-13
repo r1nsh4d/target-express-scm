@@ -90,7 +90,7 @@ export const NAV: NavItem[] = [
   { to: '/categories', label: 'Goods categories', blurb: 'Spare parts, furniture — what decides whether unloading is billed', icon: <Package className={ICON} />, roles: ADMIN, group: 2, keywords: 'divisions spare parts furniture' },
 
   { to: '/rate-cards', label: 'Rate cards', blurb: 'What each vendor division is charged, by date', icon: <ReceiptIndianRupee className={ICON} />, roles: [...ADMIN, 'ACCOUNTS'], group: 3, keywords: 'pricing tariff rates' },
-  { to: '/unloading-rates', label: 'Unloading rates', blurb: 'Furniture, priced per article plus the climb per floor', icon: <Sofa className={ICON} />, roles: [...ADMIN, 'ACCOUNTS'], group: 3, keywords: 'articles floors chair table' },
+  { to: '/unloading-rates', label: 'Unloading rates', blurb: 'What the vendor pays per article, and what the driver is paid', icon: <Sofa className={ICON} />, roles: [...ADMIN, 'ACCOUNTS'], group: 3, keywords: 'articles floors chair table driver pay margin coolie' },
   { to: '/invoices', label: 'Vendor invoices', blurb: 'Bill completed freights to vendors', icon: <FileText className={ICON} />, roles: MONEY, group: 3, keywords: 'billing gst tax bill' },
   { to: '/money-in', label: 'Money in', blurb: 'Payments received from vendors, against each invoice', icon: <Landmark className={ICON} />, roles: MONEY, group: 3, keywords: 'payments received collection receipts tds bank credit' },
   { to: '/settlements', label: 'Settlements', blurb: 'Pay drivers and vehicle owners', icon: <Wallet className={ICON} />, roles: MONEY, group: 3, keywords: 'payout payments salary hire' },
