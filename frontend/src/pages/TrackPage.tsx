@@ -191,6 +191,23 @@ export default function TrackPage() {
               with no sense of when, or a time with no sense of where, both
               leave the customer asking the same question they opened the link
               to answer. */}
+          {/* Dispatched, but the lorry has not reported yet.
+              Hiding the map in silence is how the feature looks missing
+              rather than idle — and the customer is left wondering whether
+              the page is broken or the lorry simply has not set off. */}
+          {!delivered && data.dispatched && !data.vehicle_position ? (
+            <div
+              className="mt-4 flex items-start gap-2.5 rounded-[var(--radius-control)] px-3.5 py-3"
+              style={{ background: 'var(--bg-elevated)' }}
+            >
+              <MapPin className="mt-0.5 size-3.5 shrink-0" style={{ color: 'var(--text-faint)' }} />
+              <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                The lorry has not reported its position yet. Live tracking appears here once the
+                driver is on the road.
+              </p>
+            </div>
+          ) : null}
+
           {!delivered && data.vehicle_position ? (
             <div className="mt-4">
               <Suspense fallback={<div className="skeleton" style={{ height: 220 }} />}>

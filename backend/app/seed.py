@@ -49,6 +49,7 @@ from app.models.fleet import (
 )
 from app.models.freight import Freight, FreightLeg, FreightPoint
 from app.models.rating import RateCard, UnloadingItemRate
+from app.models.tracking import VehiclePing
 from app.models.user import User
 from app.models.vendor import GoodsCategory, Vendor, VendorDivision, VendorWarehouse
 
@@ -506,20 +507,52 @@ def seed_freights(db: Session, masters: dict, drivers: list[Driver], consignees:
                 )
 
         is_open = status == FreightStatus.IN_TRANSIT
-        db.add(
-            FreightLeg(
-                freight_id=freight.id,
-                sequence=1,
-                vehicle_id=vehicles[reg].id,
-                driver_id=drivers[driver_idx].id,
-                start_odometer=start_km,
-                end_odometer=None if is_open else end_km,
-                leg_distance_km=None if is_open else end_km - start_km,
-                started_at=datetime.combine(trip_date, datetime.min.time()),
-                ended_at=None if is_open else datetime.combine(trip_date, datetime.max.time()),
-                change_reason=LegChangeReason.INITIAL,
-            )
+        leg = FreightLeg(
+            freight_id=freight.id,
+            sequence=1,
+            vehicle_id=vehicles[reg].id,
+            driver_id=drivers[driver_idx].id,
+            start_odometer=start_km,
+            end_odometer=None if is_open else end_km,
+            leg_distance_km=None if is_open else end_km - start_km,
+            started_at=datetime.combine(trip_date, datetime.min.time()),
+            ended_at=None if is_open else datetime.combine(trip_date, datetime.max.time()),
+            change_reason=LegChangeReason.INITIAL,
         )
+        db.add(leg)
+        db.flush()
+
+        # A trail for the one trip that is still out.
+        #
+        # The customer's tracking page draws the lorry and works out how far
+        # away it is, and with nothing in vehicle_pings it simply has no lorry
+        # to draw — so the feature looks missing rather than idle. The open
+        # trip is the only one where a position means anything, so it gets one:
+        # a run up the coast road from Kochi, the last point an hour out from
+        # Kannur.
+        if is_open:
+            route = [
+                (10.0159, 76.3419),   # Kochi, the godown
+                (10.3520, 76.2110),   # past Chalakudy
+                (10.5276, 76.2144),   # Thrissur
+                (10.7867, 76.6548),   # Palakkad road junction
+                (11.2588, 75.7804),   # Kozhikode
+                (11.6854, 75.5900),   # north of Vadakara
+            ]
+            minutes_ago = len(route) * 18
+            for lat, lng in route:
+                db.add(
+                    VehiclePing(
+                        freight_id=freight.id,
+                        leg_id=leg.id,
+                        latitude=Decimal(str(lat)),
+                        longitude=Decimal(str(lng)),
+                        accuracy_m=12,
+                        speed_kmph=Decimal("46.0"),
+                        recorded_at=datetime.now() - timedelta(minutes=minutes_ago),
+                    )
+                )
+                minutes_ago -= 18
 
 
 def main() -> None:

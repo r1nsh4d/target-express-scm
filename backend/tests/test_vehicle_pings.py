@@ -36,6 +36,15 @@ pytestmark = pytest.mark.tables(
     "boxes",
     "tracking_sessions",
     "vehicle_pings",
+    "labour",
+    "vehicle_types",
+    "driver_pay_terms",
+    "vehicle_hire_terms",
+    "rate_cards",
+    "unloading_item_rates",
+    "route_presets",
+    "route_preset_points",
+    "market_vehicles",
 )
 
 # Kochi, roughly. A real point on a real route.
@@ -466,3 +475,48 @@ def test_stops_ahead_push_the_estimate_out(client, running, tracked):
     after = client.get(f"/api/track/{tracked}").json()
     assert after["stops_before"] == 2
     assert after["eta_minutes"] > alone, "the stops ahead were not counted"
+
+
+def test_seed_leaves_the_open_trip_with_a_position(client):
+    """The demo has to show the map, or the feature looks missing rather than
+    idle. The only trip still out is the only one where a position means
+    anything, so that is the one seeded with a trail."""
+    from app.db.session import SessionLocal
+    from app.models.enums import FreightStatus
+    from app.models.freight import Freight
+    from app.models.tracking import VehiclePing
+    from sqlalchemy import select
+
+    from app import seed
+
+    db = SessionLocal()
+    try:
+        seed.seed_users(db)
+        masters = seed.seed_masters(db)
+        drivers = seed.seed_drivers(db, seed.seed_users(db), masters["vehicles"])
+        consignees = seed.seed_consignees(db)
+        seed.seed_freights(db, masters, drivers, consignees)
+        db.commit()
+
+        open_trips = db.execute(
+            select(Freight).where(Freight.status == FreightStatus.IN_TRANSIT)
+        ).scalars().all()
+        assert open_trips, "seed produced no trip that is still out"
+
+        for freight in open_trips:
+            pings = db.execute(
+                select(VehiclePing).where(VehiclePing.freight_id == freight.id)
+            ).scalars().all()
+            assert pings, f"{freight.trip_no} is out with no position to draw"
+
+        # And the finished ones do not, because a lorry that is back has no
+        # live position and showing one would be a lie on the customer's map.
+        done = db.execute(
+            select(Freight).where(Freight.status == FreightStatus.COMPLETED)
+        ).scalars().first()
+        if done is not None:
+            assert not db.execute(
+                select(VehiclePing).where(VehiclePing.freight_id == done.id)
+            ).scalars().all()
+    finally:
+        db.close()
