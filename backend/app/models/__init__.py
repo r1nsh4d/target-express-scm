@@ -16,7 +16,12 @@ from app.models.fleet import (
     VehicleOwner,
     VehicleType,
 )
-from app.models.freight import Freight, FreightLeg, FreightPoint
+from app.models.freight import (
+    Freight,
+    FreightLeg,
+    FreightPoint,
+    PointUnloadingItem,
+)
 from app.models.market_vehicle import MarketVehicle
 from app.models.route_preset import RoutePreset, RoutePresetPoint
 from app.models.rating import RateCard, UnloadingItemRate

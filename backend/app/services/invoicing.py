@@ -41,7 +41,12 @@ from app.services.rating import (
     money,
     resolve_rate_card,
 )
-from app.services.unloading import calculate_point_unloading, items_from_boxes, resolve_item_rates
+from app.services.unloading import (
+    UnloadItem,
+    calculate_point_unloading,
+    items_from_boxes,
+    resolve_item_rates,
+)
 
 
 @dataclass
@@ -98,25 +103,57 @@ def billable_unloading(db: Session, freight: Freight, card) -> Decimal:
         rates = resolve_item_rates(db, freight.vendor_division_id, freight.trip_date)
         total = Decimal("0")
         for point in freight.points:
-            boxes = (
-                db.execute(
-                    select(Box)
-                    .join(Consignment, Box.consignment_id == Consignment.id)
-                    .where(Consignment.freight_point_id == point.id)
-                )
-                .scalars()
-                .all()
-            )
-            result = calculate_point_unloading(
-                rates,
-                items_from_boxes(boxes),
-                floor_number=point.floor_number,
-                has_lift=point.has_lift,
-            )
-            total += result.total
+            total += _point_unloading(db, point, rates).total
         return money(total)
 
     return Decimal("0.00")
+
+
+def _point_unloading(db: Session, point, rates):
+    """Price one stop's unloading, preferring what the driver logged.
+
+    Two sources, and the order matters.
+
+    What the DRIVER logged at the door is what actually happened: he stood
+    there and carried it in. The bill says five chairs; four came off the
+    lorry and one was refused, and only he knows that.
+
+    The BOXES on the bill are the fallback, for a stop where nobody logged
+    anything — an older trip, or a driver who did not fill it in. Charging
+    zero because a man forgot is worse than charging from the paperwork, and
+    the paperwork is usually right.
+
+    It is never a mixture. A stop that has a log is priced entirely from the
+    log, including a log that says a single chair, because "he logged less than
+    the bill" is the case this exists to capture and topping it up from the
+    boxes would throw that away.
+    """
+    logged = [
+        UnloadItem(item_code=row.item_code, quantity=row.quantity)
+        for row in point.unloading_items
+        if row.quantity > 0
+    ]
+
+    if logged:
+        items = logged
+    else:
+        boxes = (
+            db.execute(
+                select(Box)
+                .join(Consignment, Box.consignment_id == Consignment.id)
+                .where(Consignment.freight_point_id == point.id)
+            )
+            .scalars()
+            .all()
+        )
+        items = items_from_boxes(boxes)
+
+    return calculate_point_unloading(
+        rates,
+        items,
+        floor_number=point.floor_number,
+        has_lift=point.has_lift,
+    )
 
 
 def billable_coolie(freight: Freight) -> Decimal:

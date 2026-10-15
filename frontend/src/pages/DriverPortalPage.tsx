@@ -28,6 +28,7 @@ import {
   Spinner,
 } from '@/components/ui'
 import { PhotoInput } from '@/components/PhotoInput'
+import { UnloadingSheet } from '@/components/UnloadingSheet'
 import { ScanBoxesSheet } from '@/components/ScanBoxesSheet'
 import { multiStopMapsUrl, singleStopMapsUrl } from '@/lib/maps'
 import { api, apiErrorMessage } from '@/lib/api'
@@ -614,7 +615,7 @@ function PointCard({
                 onChange={(e) => setBoxes(e.target.value)}
               />
             </Field>
-            <Field label="Unloading paid" hint="Cash you handed the labourers">
+            <Field label="Unloading cash paid out" hint="What you handed the labourers">
               <div className="relative">
                 <IndianRupee
                   className="pointer-events-none absolute top-1/2 left-3.5 size-3.5 -translate-y-1/2"
@@ -632,6 +633,16 @@ function PointCard({
               </div>
             </Field>
           </div>
+
+          {/* The unloading charge sheet, for vendors who pay per article.
+              Separate from the cash box above, and both are real: the cash is
+              what left his pocket, this is what the work was worth. On a
+              spare-parts run the component renders nothing at all, because
+              nothing is charged and a list of articles would be a question
+              with no answer. */}
+          <div className="groove my-1" />
+          <UnloadingSheet pointId={point.id} />
+          <div className="groove my-1" />
           <Field label="Received by" hint="Name of the person who took the goods">
             <Input value={receiver} onChange={(e) => setReceiver(e.target.value)} />
           </Field>

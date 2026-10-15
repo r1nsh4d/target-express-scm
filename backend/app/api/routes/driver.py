@@ -23,9 +23,15 @@ from app.models.consignment import Box, Consignment
 from app.models.expense import TripExpense
 from app.models.fleet import Driver
 from app.models.tracking import VehiclePing
-from app.models.freight import Freight, FreightLeg, FreightPoint
+from app.models.freight import Freight, FreightLeg, FreightPoint, PointUnloadingItem
 from app.models.settlement import Advance, FreightPayout
 from app.models.user import User
+from app.services.rating import money
+from app.services.unloading import (
+    UnloadItem,
+    calculate_point_unloading,
+    resolve_item_rates,
+)
 from app.services.completion import complete_freight_if_returned, record_leg_payouts
 
 router = APIRouter(prefix="/api/driver", tags=["driver"])
@@ -618,6 +624,243 @@ def _boxes_for_point(db: Session, point: FreightPoint) -> list[Box]:
         .all()
     )
     return sorted(rows, key=lambda b: (b.consignment.vendor_bill_no if b.consignment else "", b.item_no))
+
+
+def _my_point(db: Session, point: FreightPoint, user: User) -> None:
+    """Refuse a stop on somebody else's trip.
+
+    The scan endpoint does not check this, and for a scan it hardly matters —
+    the worst case is a driver seeing that a carton is not his. This writes
+    money: what the vendor is charged for unloading and what a driver earns for
+    it. So it checks.
+    """
+    driver = _driver_for(db, user)
+    if not any(leg.driver_id == driver.id for leg in point.freight.legs):
+        raise HTTPException(status_code=403, detail="This trip is not assigned to you")
+
+
+class ArticleOut(BaseModel):
+    item_code: str
+    item_name: str
+    # What one of these costs the vendor at THIS point's floor, and what the
+    # driver earns for carrying it. Sent already priced so the phone can total
+    # it without knowing anything about the rate card.
+    vendor_each: Decimal
+    driver_each: Decimal
+    quantity: int
+
+
+class UnloadingSheetOut(BaseModel):
+    floor_number: int
+    has_lift: bool
+    articles: list[ArticleOut]
+    vendor_total: Decimal
+    driver_total: Decimal
+    coolie_paid: Decimal
+    coolie_note: str | None
+    # False when this division does not price unloading per article at all —
+    # spare parts are carried in and nothing is charged — so the phone shows a
+    # plain cash box instead of a list nobody can fill in.
+    priced_per_article: bool
+    # Whether the driver's own side is shown. A driver on a rented vehicle is
+    # paid by the vehicle's owner, not by Target Express, so a figure here
+    # would be money he is never going to see. Decided on the server and the
+    # numbers are zeroed before they are sent, rather than hidden by the
+    # screen — a value that must not be shown should not be transmitted.
+    shows_earnings: bool
+
+
+def _unloading_sheet(
+    db: Session, point: FreightPoint, user: User
+) -> UnloadingSheetOut:
+    freight = point.freight
+    rates = resolve_item_rates(db, freight.vendor_division_id, freight.trip_date)
+    shows_earnings = bool(user.can_view_earnings)
+
+    logged = {
+        row.item_code: row.quantity
+        for row in db.execute(
+            select(PointUnloadingItem).where(
+                PointUnloadingItem.freight_point_id == point.id
+            )
+        ).scalars()
+    }
+
+    articles = [
+        ArticleOut(
+            item_code=rate.item_code,
+            item_name=rate.item_name,
+            vendor_each=rate.unit_charge(point.floor_number, point.has_lift),
+            driver_each=(
+                rate.unit_pay(point.floor_number, point.has_lift)
+                if shows_earnings
+                else Decimal("0.00")
+            ),
+            quantity=logged.get(rate.item_code, 0),
+        )
+        for rate in sorted(rates.values(), key=lambda r: r.item_name)
+    ]
+
+    return UnloadingSheetOut(
+        floor_number=point.floor_number,
+        has_lift=point.has_lift,
+        articles=articles,
+        vendor_total=money(
+            sum((a.vendor_each * a.quantity for a in articles), Decimal("0"))
+        ),
+        driver_total=money(
+            sum((a.driver_each * a.quantity for a in articles), Decimal("0"))
+        ),
+        shows_earnings=shows_earnings,
+        coolie_paid=Decimal(point.coolie_paid or 0),
+        coolie_note=point.coolie_note,
+        priced_per_article=bool(rates),
+    )
+
+
+@router.get("/points/{point_id}/unloading", response_model=UnloadingSheetOut)
+def unloading_sheet(
+    point_id: str,
+    floor: int | None = Query(default=None, ge=0, le=100),
+    lift: bool | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.DRIVER)),
+) -> UnloadingSheetOut:
+    """The articles this vendor pays unloading on, priced for this door.
+
+    The floor and the lift can be overridden in the query so the phone reprices
+    as the driver changes them, before anything is saved. He finds out the flat
+    is on the third floor when he arrives, not when the trip was planned.
+    """
+    point = db.get(FreightPoint, point_id)
+    if point is None:
+        raise HTTPException(status_code=404, detail="Point not found")
+    _my_point(db, point, user)
+
+    if floor is not None:
+        point.floor_number = floor
+    if lift is not None:
+        point.has_lift = lift
+
+    sheet = _unloading_sheet(db, point, user)
+    # Nothing is saved by looking. The overrides above touched the in-memory
+    # object only, so a driver who opens the screen and backs out has changed
+    # nothing about what the vendor is charged.
+    db.rollback()
+    return sheet
+
+
+class LoggedArticleIn(BaseModel):
+    item_code: str = Field(min_length=1, max_length=48)
+    quantity: int = Field(ge=0, le=999)
+
+
+class UnloadingIn(BaseModel):
+    articles: list[LoggedArticleIn] = []
+    floor_number: int | None = Field(default=None, ge=0, le=100)
+    has_lift: bool | None = None
+    # Cash handed to a local porter gang. Not unloading, and never folded into
+    # it — see the note on FreightPoint.coolie_paid.
+    coolie_paid: Decimal | None = Field(default=None, ge=0)
+    coolie_note: str | None = Field(default=None, max_length=300)
+
+
+@router.post("/points/{point_id}/unloading", response_model=UnloadingSheetOut)
+def log_unloading(
+    point_id: str,
+    payload: UnloadingIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.DRIVER)),
+) -> UnloadingSheetOut:
+    """What the driver actually carried in, and up how many floors.
+
+    This is the unloading charge sheet. It used to be worked out from the boxes
+    on the bill, which is a guess at what happened: the bill says five chairs,
+    four came off the lorry, one was refused at the door, and the sheet charged
+    for five anyway. The man who carried them knows, and he has a phone in his
+    hand.
+
+    Both sides are priced here and stored on the point — what the vendor is
+    charged and what the driver earns. One becomes the sheet pledged to the
+    vendor, the other his pay, and they come off the same rate row for the same
+    article on the same date so the margin is a subtraction.
+    """
+    point = db.get(FreightPoint, point_id)
+    if point is None:
+        raise HTTPException(status_code=404, detail="Point not found")
+    _my_point(db, point, user)
+
+    if point.freight.status in (FreightStatus.BILLED, FreightStatus.SETTLED):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This trip has been invoiced. Changing the unloading now would make "
+                "the invoice disagree with the trip it was built from."
+            ),
+        )
+
+    # He is at the door, so he is the authority on the climb.
+    if payload.floor_number is not None:
+        point.floor_number = payload.floor_number
+    if payload.has_lift is not None:
+        point.has_lift = payload.has_lift
+
+    freight = point.freight
+    rates = resolve_item_rates(db, freight.vendor_division_id, freight.trip_date)
+
+    # Replaced wholesale rather than merged, because the screen sends the whole
+    # list every time and a quantity corrected from 4 to 3 has to go down.
+    for existing in list(point.unloading_items):
+        db.delete(existing)
+    db.flush()
+
+    unknown: list[str] = []
+    for article in payload.articles:
+        if article.quantity <= 0:
+            continue
+        rate = rates.get(article.item_code)
+        if rate is None:
+            unknown.append(article.item_code)
+            continue
+        db.add(
+            PointUnloadingItem(
+                freight_point_id=point.id,
+                item_code=rate.item_code,
+                item_name=rate.item_name,
+                quantity=article.quantity,
+            )
+        )
+
+    if unknown:
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail=f"No unloading rate for {', '.join(sorted(unknown))} on this vendor",
+        )
+
+    db.flush()
+
+    items = [
+        UnloadItem(item_code=row.item_code, quantity=row.quantity)
+        for row in point.unloading_items
+    ]
+    charged = calculate_point_unloading(
+        rates, items, floor_number=point.floor_number, has_lift=point.has_lift
+    )
+    point.unloading_billed = charged.total
+
+    if payload.coolie_paid is not None:
+        point.coolie_paid = payload.coolie_paid
+        # Reimbursed at what was actually handed over unless the office says
+        # otherwise. A driver is not left out of pocket for somebody else's
+        # demand at a market gate.
+        point.coolie_billed = payload.coolie_paid
+    if payload.coolie_note is not None:
+        point.coolie_note = payload.coolie_note.strip() or None
+
+    db.commit()
+    db.refresh(point)
+    return _unloading_sheet(db, point, user)
 
 
 @router.post("/points/{point_id}/deliver", status_code=status.HTTP_204_NO_CONTENT)

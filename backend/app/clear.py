@@ -41,6 +41,7 @@ RECORD_TABLES = [
     "odometer_corrections",
     "boxes",
     "consignments",
+    "point_unloading_items",
     # Money
     "vendor_invoice_lines",
     "vendor_invoices",

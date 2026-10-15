@@ -10,6 +10,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -207,6 +208,9 @@ class FreightPoint(BaseModel):
     consignments: Mapped[list["Consignment"]] = relationship(  # noqa: F821
         back_populates="freight_point"
     )
+    unloading_items: Mapped[list["PointUnloadingItem"]] = relationship(
+        back_populates="point", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<FreightPoint {self.sequence} of freight {self.freight_id}>"
@@ -259,3 +263,47 @@ class FreightLeg(BaseModel):
 
     def __repr__(self) -> str:
         return f"<FreightLeg {self.sequence} of freight {self.freight_id}>"
+
+
+class PointUnloadingItem(BaseModel):
+    """What the driver actually carried in at this stop.
+
+    The vendor's unloading charge was worked out from the BOXES on the bill,
+    which is a guess at what happened: the bill says five chairs, four came off
+    the lorry, one was refused at the door, and the sheet still charged for
+    five. The man who carried them knows, and he is standing there with a
+    phone.
+
+    So he logs it — the articles and how many of each — and this is what the
+    unloading sheet is built from when it exists. The boxes remain the fallback
+    for a point where nobody logged anything, because a charge of zero because
+    a driver forgot is worse than a charge from the paperwork.
+
+    The item name is copied in rather than looked up. A rate card is versioned
+    and never edited, but an article can be renamed, and a sheet reprinted
+    next year should say what the driver was shown at the door.
+    """
+
+    __tablename__ = "point_unloading_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "freight_point_id", "item_code", name="uq_point_unloading_point_item"
+        ),
+    )
+
+    freight_point_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("freight_points.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    item_code: Mapped[str] = mapped_column(String(48), nullable=False)
+    item_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    quantity: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+
+    point: Mapped[FreightPoint] = relationship(back_populates="unloading_items")
+
+    def __repr__(self) -> str:
+        return f"<PointUnloadingItem {self.quantity} x {self.item_code}>"

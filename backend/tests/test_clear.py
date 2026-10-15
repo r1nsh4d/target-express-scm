@@ -78,6 +78,7 @@ def test_children_are_deleted_before_their_parents():
     for child, parent in [
         ("boxes", "consignments"),
         ("consignments", "freight_points"),
+        ("point_unloading_items", "freight_points"),
         ("vendor_invoice_lines", "vendor_invoices"),
         ("freight_points", "freights"),
         ("freight_legs", "freights"),
