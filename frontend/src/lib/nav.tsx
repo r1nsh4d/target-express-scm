@@ -63,6 +63,24 @@ const MONEY: UserRole[] = ['SUPER_ADMIN', 'ACCOUNTS']
 
 const ICON = 'size-4 shrink-0'
 
+/* The rail, in sections that fold.
+ *
+ * Twenty-six items were all on screen at once, and a menu that long is one
+ * nobody reads — the eye gives up and people navigate by memory or not at
+ * all. Most of them are things you touch once when setting up a vendor and
+ * never again.
+ *
+ * So only the day's work is open. Money, setup and administration fold away,
+ * and the section holding the screen you are on opens itself, so nothing is
+ * ever hidden from somebody who is already looking at it.
+ */
+export const SECTIONS: { group: number; label: string; openByDefault: boolean }[] = [
+  { group: 1, label: 'Every day', openByDefault: true },
+  { group: 3, label: 'Money', openByDefault: false },
+  { group: 2, label: 'Set up', openByDefault: false },
+  { group: 4, label: 'Admin', openByDefault: false },
+]
+
 export const NAV_GROUPS: Record<number, string> = {
   1: 'Operations',
   2: 'Masters',

@@ -1,4 +1,4 @@
-import { Bookmark, BookmarkPlus, MapPin, Plus, Route, Trash2 } from 'lucide-react'
+import { Bookmark, BookmarkPlus, MapPin, Plus, Route, Trash2, Wand2 } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -44,9 +44,17 @@ export default function TripsPage() {
       <PageHeader
         description="A freight runs out from one warehouse, serves its points, and is finished when the vehicle is back at that warehouse."
         action={
-          <Button icon={<Plus className="size-4" />} onClick={() => setOpen(true)}>
-            New trip
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* A freight built from the day's bills already knows its stops
+                and already has the bills on them — which is the step people
+                miss when they build one by hand. */}
+            <Button icon={<Wand2 className="size-4" />} onClick={() => navigate('/day-sheet')}>
+              From the day&rsquo;s bills
+            </Button>
+            <Button variant="secondary" icon={<Plus className="size-4" />} onClick={() => setOpen(true)}>
+              Build by hand
+            </Button>
+          </div>
         }
       />
 

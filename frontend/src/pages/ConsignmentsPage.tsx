@@ -1,5 +1,6 @@
-import { Package, Plus, Printer, ScanBarcode, X } from 'lucide-react'
+import { Package, Plus, Printer, ScanBarcode, Wand2, X } from 'lucide-react'
 import { useCallback, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import type { Label } from '@/components/LabelCard'
 import { LabelCard } from '@/components/LabelCard'
@@ -45,6 +46,7 @@ interface Box {
 }
 
 export default function ConsignmentsPage() {
+  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   // The bill whose stickers are being looked at. Clicking a row opens them,
   // because "which cartons are on this bill, and what is pasted on them" is
@@ -67,13 +69,22 @@ export default function ConsignmentsPage() {
       <PageHeader
         description="One vendor bill, for one delivery point, covering a number of boxes. Creating a bill generates a box per carton — those are what get labelled and counted at both ends. Click a bill to see its stickers and reprint one."
         action={
-          <Button
-            icon={<Plus className="size-4" />}
-            onClick={() => setOpen(true)}
-            disabled={!divisions.data?.length}
-          >
-            New consignment
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* The quick way first. Entering a day one dialog at a time is
+                the slowest path through this application, and it was the only
+                one anybody could see from here. */}
+            <Button icon={<Wand2 className="size-4" />} onClick={() => navigate('/day-sheet')}>
+              Enter a day&rsquo;s bills
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<Plus className="size-4" />}
+              onClick={() => setOpen(true)}
+              disabled={!divisions.data?.length}
+            >
+              One bill
+            </Button>
+          </div>
         }
       />
 
