@@ -22,7 +22,7 @@ import { Button, ErrorNote, Field, Input, Logo, Modal } from '@/components/ui'
 import { api, apiErrorMessage } from '@/lib/api'
 import { ROLE_LABELS, useAuth } from '@/lib/auth'
 import type { NavItem } from '@/lib/nav'
-import { currentNav, navFor } from '@/lib/nav'
+import { currentNav, navForAccess } from '@/lib/nav'
 import { toggleTheme, useTheme } from '@/lib/theme'
 import { TEXT_SIZE_LABELS, setTextSize, useTextSize } from '@/lib/textsize'
 
@@ -158,7 +158,15 @@ function Rail({
 }) {
   const { user } = useAuth()
   const { pathname } = useLocation()
-  const visible = navFor(user?.role)
+  /* What the SERVER says this person may reach, not what the browser
+     guesses. A custom role's screen list lives in the database and a
+     client-side guess at it goes stale the moment somebody changes it. */
+  const access = useQuery({
+    queryKey: ['/me/access'],
+    queryFn: async () => (await api.get<{ screens: string[] }>('/me/access')).data,
+    staleTime: 5 * 60_000,
+  })
+  const visible = navForAccess(user?.role, access.data?.screens)
 
   /* The count of uncalled website enquiries, on the rail so it is visible from
      every screen rather than only the dashboard. It rides on the summary the

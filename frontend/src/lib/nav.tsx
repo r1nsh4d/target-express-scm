@@ -22,6 +22,7 @@ import {
   ReceiptIndianRupee,
   ReceiptText,
   Route,
+  ShieldCheck,
   ScanBarcode,
   Sofa,
   Truck,
@@ -99,6 +100,7 @@ export const NAV: NavItem[] = [
   { to: '/expenses', label: 'Expenses', blurb: 'What drivers paid on the road, waiting for a decision', icon: <ReceiptText className={ICON} />, roles: [...MONEY, 'OPS_ADMIN'], group: 3, keywords: 'diesel toll claims approve' },
 
   { to: '/enquiries', label: 'Enquiries', blurb: 'Businesses who asked to work with Target Express', icon: <MessageSquare className={ICON} />, roles: ADMIN, group: 4, keywords: 'leads contact sales website' },
+  { to: '/roles', label: 'Roles', blurb: 'What each kind of user may reach', icon: <ShieldCheck className={ICON} />, roles: ADMIN, group: 4, keywords: 'permissions privileges access rights' },
   { to: '/users', label: 'Users', blurb: 'Logins, roles and who can see earnings', icon: <Users className={ICON} />, roles: ADMIN, group: 4, keywords: 'accounts permissions roles' },
   { to: '/guide', label: 'User guide', blurb: 'The full cycle, in the order it has to be done', icon: <BookOpen className={ICON} />, roles: ALL_BACK_OFFICE, group: 4, keywords: 'help how to manual training' },
 ]
@@ -108,6 +110,25 @@ export function currentNav(pathname: string): NavItem | undefined {
   return [...NAV]
     .sort((a, b) => b.to.length - a.to.length)
     .find((n) => pathname === n.to || pathname.startsWith(`${n.to}/`))
+}
+
+/* Which screens this person sees.
+ *
+ * A custom role brings its own list, and it wins — that is the whole point of
+ * being able to make one. The built-in role's list is the fallback, so
+ * somebody who is not on a custom role sees exactly what they always did.
+ *
+ * `screens` are keyed by the path without its slash, which is what the server
+ * sends back from /me/access. */
+export function navForAccess(
+  role: UserRole | undefined,
+  screens: string[] | undefined,
+): NavItem[] {
+  if (screens && screens.length) {
+    const allowed = new Set(screens)
+    return NAV.filter((item) => allowed.has(item.to.replace(/^\//, '')))
+  }
+  return navFor(role)
 }
 
 export function navFor(role: UserRole | undefined): NavItem[] {

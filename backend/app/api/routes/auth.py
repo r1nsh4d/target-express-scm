@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import ADMIN_ROLES, get_current_user, require_roles
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
+from app.models.enums import UserRole
+from app.models.role import Role
 from app.models.user import User
 from app.schemas.auth import (
     LoginRequest,
@@ -39,12 +41,12 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
         )
 
     token = create_access_token(subject=str(user.id), role=str(user.role))
-    return TokenResponse(access_token=token, user=UserOut.model_validate(user))
+    return TokenResponse(access_token=token, user=UserOut.of(user))
 
 
 @router.get("/me", response_model=UserOut)
 def read_me(user: User = Depends(get_current_user)) -> UserOut:
-    return UserOut.model_validate(user)
+    return UserOut.of(user)
 
 
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
@@ -74,18 +76,32 @@ def create_user(
             detail="A user with this phone number already exists",
         )
 
+    # A role somebody made decides what this person reaches. The enum is
+    # still set, because it is the base everything falls back to and because
+    # a role can be deleted out from under a user.
+    base = payload.role
+    if payload.role_id is not None:
+        role = db.get(Role, payload.role_id)
+        if role is None:
+            raise HTTPException(status_code=404, detail="That role does not exist")
+        if not role.is_active:
+            raise HTTPException(status_code=409, detail=f"{role.name} is not in use")
+        if role.base_role:
+            base = UserRole(role.base_role)
+
     user = User(
         full_name=payload.full_name,
         phone=payload.phone,
         email=payload.email,
-        role=payload.role,
+        role=base,
+        role_id=payload.role_id,
         can_view_earnings=payload.can_view_earnings,
         hashed_password=hash_password(payload.password),
     )
     db.add(user)
     db.commit()
     db.refresh(user)
-    return UserOut.model_validate(user)
+    return UserOut.of(user)
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
@@ -100,12 +116,33 @@ def update_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+
+    # Moving somebody onto a custom role, or off one. Handled before the
+    # blanket setattr below because clear_role is not a column and because
+    # the base enum has to follow the role rather than be left behind
+    # pointing at whatever they used to be.
+    clear = data.pop("clear_role", False)
+    role_id = data.pop("role_id", None)
+
+    if clear:
+        user.role_id = None
+    elif role_id is not None:
+        role = db.get(Role, role_id)
+        if role is None:
+            raise HTTPException(status_code=404, detail="That role does not exist")
+        if not role.is_active:
+            raise HTTPException(status_code=409, detail=f"{role.name} is not in use")
+        user.role_id = role.id
+        if role.base_role:
+            user.role = UserRole(role.base_role)
+
+    for field, value in data.items():
         setattr(user, field, value)
 
     db.commit()
     db.refresh(user)
-    return UserOut.model_validate(user)
+    return UserOut.of(user)
 
 
 class ResetPasswordIn(BaseModel):
@@ -149,7 +186,7 @@ def reset_password(
     user.hashed_password = hash_password(payload.new_password)
     db.commit()
     db.refresh(user)
-    return UserOut.model_validate(user)
+    return UserOut.of(user)
 
 
 @router.get("/users", response_model=list[UserOut])
@@ -158,4 +195,4 @@ def list_users(
     _: User = Depends(require_roles(*ADMIN_ROLES)),
 ) -> list[UserOut]:
     users = db.execute(select(User).order_by(User.full_name)).scalars().all()
-    return [UserOut.model_validate(u) for u in users]
+    return [UserOut.of(u) for u in users]

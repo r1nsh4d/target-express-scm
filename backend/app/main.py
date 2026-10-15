@@ -18,6 +18,7 @@ from app.api.routes import (
     presets,
     public,
     reports,
+    roles,
     returns,
     tracking,
     uploads,
@@ -56,6 +57,7 @@ app.include_router(billing.router)
 app.include_router(returns.router)
 app.include_router(reports.router)
 app.include_router(nextsteps.router)
+app.include_router(roles.router)
 app.include_router(company.router)
 app.include_router(expenses.router)
 app.include_router(uploads.router)

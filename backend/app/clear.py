@@ -63,6 +63,9 @@ RECORD_TABLES = [
 # subtracting one list from another.
 KEPT_TABLES = [
     "users",
+    "roles",
+    "role_capabilities",
+    "role_screens",
     "drivers",
     "driver_pay_terms",
     "vehicles",

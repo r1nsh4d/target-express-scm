@@ -180,16 +180,27 @@ export default function UsersPage() {
   )
 }
 
+interface RoleOption {
+  id: string
+  name: string
+  description: string | null
+  is_system: boolean
+  base_role: string | null
+}
+
 function UserForm({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const roles = useList<RoleOption>('/roles')
   const blank = {
     full_name: '',
     phone: '',
     email: '',
     password: '',
     role: 'WAREHOUSE_ADMIN' as UserRole,
+    role_id: '',
     can_view_earnings: false,
   }
   const [form, setForm] = useState(blank)
+  const picked = roles.data?.find((r) => r.id === form.role_id)
   const [error, setError] = useState<string | null>(null)
 
   const create = useCreate<Record<string, unknown>>('/auth/users', {
@@ -207,7 +218,13 @@ function UserForm({ open, onClose }: { open: boolean; onClose: () => void }) {
           e.preventDefault()
           setError(null)
           create.mutate(
-            { ...form, email: form.email || null },
+            {
+              ...form,
+              email: form.email || null,
+              // Empty means a built-in role, and the server reads null for
+              // that — an empty string is not a uuid and would be refused.
+              role_id: form.role_id || null,
+            },
             { onError: (err) => setError(apiErrorMessage(err)) },
           )
         }}
@@ -238,16 +255,49 @@ function UserForm({ open, onClose }: { open: boolean; onClose: () => void }) {
           </Field>
         </div>
 
-        <Field label="Role">
+        {/* Every role, built-in and made. A role somebody created carries
+            its own permissions; the built-in six are the ones that were
+            always here. Picking from one list rather than two, because "is
+            this a real role or a custom one" is not a question the person
+            creating a user should have to hold in their head. */}
+        <Field
+          label="Role"
+          hint={
+            picked && !picked.is_system
+              ? picked.description || 'A role your organisation created'
+              : 'Built in'
+          }
+        >
           <Select
-            value={form.role}
-            onChange={(e) => setForm({ ...form, role: e.target.value as UserRole })}
+            value={form.role_id || form.role}
+            onChange={(e) => {
+              const value = e.target.value
+              const custom = roles.data?.find((r) => r.id === value)
+              setForm({
+                ...form,
+                role_id: custom ? custom.id : '',
+                role: (custom?.base_role ?? value) as UserRole,
+              })
+            }}
           >
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {ROLE_LABELS[r]}
-              </option>
-            ))}
+            <optgroup label="Built in">
+              {ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {ROLE_LABELS[r]}
+                </option>
+              ))}
+            </optgroup>
+            {roles.data?.filter((r) => !r.is_system).length ? (
+              <optgroup label="Your roles">
+                {roles.data
+                  .filter((r) => !r.is_system)
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+              </optgroup>
+            ) : null}
           </Select>
         </Field>
 

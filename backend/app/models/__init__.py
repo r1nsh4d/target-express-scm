@@ -27,6 +27,7 @@ from app.models.route_preset import RoutePreset, RoutePresetPoint
 from app.models.rating import RateCard, UnloadingItemRate
 from app.models.settlement import Advance, FreightPayout, Settlement
 from app.models.tracking import LocationChangeRequest, TrackingSession, VehiclePing
+from app.models.role import Role, RoleCapability, RoleScreen
 from app.models.user import User
 from app.models.vendor import GoodsCategory, Vendor, VendorDivision, VendorWarehouse
 

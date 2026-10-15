@@ -14,6 +14,7 @@ import DaySheetPage from '@/pages/DaySheetPage'
 import InvoicesPage from '@/pages/InvoicesPage'
 import MoneyInPage from '@/pages/MoneyInPage'
 import ReportsPage from '@/pages/ReportsPage'
+import RolesPage from '@/pages/RolesPage'
 import ReturnsPage from '@/pages/ReturnsPage'
 import LabelsPage from '@/pages/LabelsPage'
 import MarketVehiclesPage from '@/pages/MarketVehiclesPage'
@@ -122,6 +123,7 @@ export default function App() {
         <Route path="expenses" element={<ExpensesPage />} />
         <Route path="unloading-rates" element={<UnloadingRatesPage />} />
         <Route path="labour" element={<LabourPage />} />
+        <Route path="roles" element={<RolesPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="enquiries" element={<EnquiriesPage />} />
       </Route>
