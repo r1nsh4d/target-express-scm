@@ -205,6 +205,21 @@ class FreightPoint(BaseModel):
 
     freight: Mapped[Freight] = relationship(back_populates="points")
     consignee: Mapped[Consignee] = relationship()
+    # --- what the customer said ------------------------------------------- #
+    #
+    # Left by the consignee from their own tracking link after the goods are
+    # in, and it is the only account of the delivery that does not come from
+    # the people who made it. A driver who is quick and careful and a driver
+    # who leaves cartons in the rain both look identical in a box count.
+    #
+    # One to five, nullable because most people will not bother and a default
+    # of 3 would be an opinion nobody held. The remark matters more than the
+    # number: "they carried it up without being asked" is actionable in a way
+    # that a 5 is not.
+    customer_rating: Mapped[int | None] = mapped_column(Integer)
+    customer_remarks: Mapped[str | None] = mapped_column(Text)
+    rated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     consignments: Mapped[list["Consignment"]] = relationship(  # noqa: F821
         back_populates="freight_point"
     )

@@ -39,6 +39,16 @@ interface Report {
   by_division: { name: string; trips: number; amount: string }[]
   top_customers: { name: string; trips: number }[]
   drivers: { name: string; trips: number; km: number; earned: string }[]
+  vehicles: {
+    registration_no: string
+    owned: boolean
+    trips: number
+    km: number
+    invoiced: string
+    cost: string
+    margin: string
+    margin_per_km: string
+  }[]
   overdue: {
     invoice_no: string
     vendor_division_name: string | null
@@ -256,6 +266,87 @@ export default function ReportsPage() {
                   header: 'Earned',
                   align: 'right',
                   render: (d) => <span className="tnum font-medium">{rupees(d.earned)}</span>,
+                },
+              ]}
+            />
+          </Card>
+
+          <Card className="overflow-hidden">
+            <div className="px-4 py-3.5">
+              <h3 className="text-[14px] font-semibold">Vehicles</h3>
+              <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                Attributed by leg, so a trip that broke down and finished on a hired lorry is
+                split between the two. Rupees per kilometre is the only fair comparison between a
+                DOST doing town runs and a lorry doing Kasaragod and back.
+              </p>
+            </div>
+            <Table
+              rows={r.vehicles}
+              rowKey={(v) => v.registration_no}
+              empty={<EmptyState title="No completed legs in this period" />}
+              columns={[
+                {
+                  key: 'reg',
+                  header: 'Vehicle',
+                  render: (v) => (
+                    <div>
+                      <div className="font-medium">{v.registration_no}</div>
+                      <div className="text-[11px]" style={{ color: 'var(--text-faint)' }}>
+                        {v.owned ? 'Owned' : 'Hired'}
+                      </div>
+                    </div>
+                  ),
+                },
+                {
+                  key: 't',
+                  header: 'Legs',
+                  align: 'right',
+                  render: (v) => <span className="tnum">{v.trips}</span>,
+                },
+                {
+                  key: 'k',
+                  header: 'KM',
+                  align: 'right',
+                  render: (v) => <span className="tnum">{v.km.toLocaleString('en-IN')}</span>,
+                },
+                {
+                  key: 'i',
+                  header: 'Invoiced',
+                  align: 'right',
+                  render: (v) => <span className="tnum">{rupees(v.invoiced)}</span>,
+                },
+                {
+                  key: 'c',
+                  header: 'Cost',
+                  align: 'right',
+                  render: (v) => (
+                    <span className="tnum" style={{ color: 'var(--text-muted)' }}>
+                      {rupees(v.cost)}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'm',
+                  header: 'Margin',
+                  align: 'right',
+                  render: (v) => (
+                    <span
+                      className="tnum font-medium"
+                      style={{ color: Number(v.margin) >= 0 ? 'var(--success)' : 'var(--danger)' }}
+                    >
+                      {rupees(v.margin)}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'pk',
+                  header: 'Per km',
+                  align: 'right',
+                  render: (v) => (
+                    <span className="tnum" style={{ color: 'var(--text-muted)' }}>
+                      {rupees(v.margin_per_km)}
+                    </span>
+                  ),
                 },
               ]}
             />

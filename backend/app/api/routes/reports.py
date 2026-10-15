@@ -94,6 +94,23 @@ class DriverRow(BaseModel):
     earned: Decimal
 
 
+class VehicleRow(BaseModel):
+    registration_no: str
+    owned: bool
+    trips: int
+    km: int
+    # What the vendor was invoiced for the trips this lorry ran, and what the
+    # lorry cost — hire to its owner for a rented one, the driver's pay and
+    # road expenses either way. The gap is what the vehicle contributed.
+    invoiced: Decimal
+    cost: Decimal
+    margin: Decimal
+    # The figure that decides whether to buy another one, or stop hiring this
+    # one. Rupees per kilometre is the only way to compare a DOST doing short
+    # town runs against a lorry doing Kasaragod and back.
+    margin_per_km: Decimal
+
+
 class OverdueRow(BaseModel):
     invoice_no: str
     vendor_division_name: str | None
@@ -111,6 +128,7 @@ class ReportOut(BaseModel):
     by_division: list[NamedAmount]
     top_customers: list[NamedAmount]
     drivers: list[DriverRow]
+    vehicles: list[VehicleRow]
     overdue: list[OverdueRow]
 
 
@@ -354,6 +372,84 @@ def build_overview(db: Session, start: date, end: date) -> ReportOut:
                 if did in names
             ]
 
+    # --- what each lorry did --------------------------------------------------- #
+    #
+    # Attributed by LEG, not by freight. A trip that broke down and finished on
+    # a hired lorry was run by two vehicles, and crediting the whole invoice to
+    # the first one would make it look better than it was and the hire look
+    # free.
+    vehicles: list[VehicleRow] = []
+    if freight_ids:
+        from app.models.fleet import Vehicle
+        from app.models.freight import FreightLeg
+
+        invoiced_by_freight: dict = {}
+        for inv in invoices:
+            for line in inv.lines:
+                invoiced_by_freight[line.freight_id] = Decimal(line.line_total or 0)
+
+        legs = list(
+            db.execute(
+                select(FreightLeg).where(FreightLeg.freight_id.in_(freight_ids))
+            ).scalars()
+        )
+        legs_per_freight: dict = {}
+        for leg in legs:
+            legs_per_freight[leg.freight_id] = legs_per_freight.get(leg.freight_id, 0) + 1
+
+        per_vehicle: dict = {}
+        for leg in legs:
+            row = per_vehicle.setdefault(
+                str(leg.vehicle_id),
+                {"trips": 0, "km": 0, "invoiced": Decimal("0"), "cost": Decimal("0")},
+            )
+            row["trips"] += 1
+            row["km"] += int(leg.leg_distance_km or 0)
+            # Split evenly across the legs of that freight. Splitting by
+            # distance would be better and needs a closed odometer on every
+            # leg, which a breakdown is precisely the case that lacks.
+            share = legs_per_freight.get(leg.freight_id, 1)
+            row["invoiced"] += invoiced_by_freight.get(leg.freight_id, Decimal("0")) / share
+
+        for payout in db.execute(
+            select(FreightPayout).where(FreightPayout.freight_id.in_(freight_ids))
+        ).scalars():
+            if payout.vehicle_id is None:
+                continue
+            key = str(payout.vehicle_id)
+            if key in per_vehicle:
+                per_vehicle[key]["cost"] += Decimal(payout.amount or 0)
+
+        if per_vehicle:
+            registrations = {
+                str(v.id): v
+                for v in db.execute(
+                    select(Vehicle).where(Vehicle.id.in_(list(per_vehicle)))
+                ).scalars()
+            }
+            for vid, row in per_vehicle.items():
+                vehicle = registrations.get(vid)
+                if vehicle is None:
+                    continue
+                invoiced_v = money(row["invoiced"])
+                cost_v = money(row["cost"])
+                margin_v = money(invoiced_v - cost_v)
+                vehicles.append(
+                    VehicleRow(
+                        registration_no=vehicle.registration_no,
+                        owned=str(vehicle.ownership).upper().endswith("OWNED"),
+                        trips=row["trips"],
+                        km=row["km"],
+                        invoiced=invoiced_v,
+                        cost=cost_v,
+                        margin=margin_v,
+                        margin_per_km=(
+                            money(margin_v / Decimal(row["km"])) if row["km"] else Decimal("0.00")
+                        ),
+                    )
+                )
+            vehicles.sort(key=lambda v: -v.margin)
+
     # --- who has not paid ----------------------------------------------------- #
     overdue = [
         OverdueRow(
@@ -393,6 +489,7 @@ def build_overview(db: Session, start: date, end: date) -> ReportOut:
         by_division=by_division,
         top_customers=top_customers,
         drivers=drivers[:10],
+        vehicles=vehicles[:15],
         overdue=overdue[:10],
     )
 

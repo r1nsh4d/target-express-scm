@@ -15,7 +15,7 @@ import { useParams } from 'react-router-dom'
 
 import { ConsignmentNote } from '@/components/ConsignmentNote'
 import { BRAND } from '@/lib/brand'
-import { Button, Card, ErrorNote, Spinner } from '@/components/ui'
+import { Button, Card, ErrorNote, Spinner, Textarea } from '@/components/ui'
 import { api, apiErrorMessage } from '@/lib/api'
 
 const TrackMap = lazy(() =>
@@ -65,6 +65,8 @@ interface Tracking {
   vehicle_no: string | null
   driver_name: string | null
   consignee_phone: string | null
+  customer_rating: number | null
+  customer_remarks: string | null
   driver_phone: string | null
   delivery_photo_url: string | null
   receiver_name: string | null
@@ -327,6 +329,11 @@ export default function TrackPage() {
           )}
         </Card>
 
+        {/* Only once the goods are in.
+            Rating a delivery that has not happened is either a mistake or
+            somebody rating the wait, and neither is what this measures. */}
+        {delivered ? <RateDelivery token={token!} data={data} /> : null}
+
         {/* The consignment note.
             The LR is the document that travels with the goods, and until now
             the customer had no way to get their part of it — they had a page
@@ -544,4 +551,96 @@ function sinceText(iso: string): string {
   if (minutes < 60) return `${minutes} minutes ago`
   const hours = Math.round(minutes / 60)
   return hours === 1 ? 'an hour ago' : `${hours} hours ago`
+}
+
+/* How the delivery went, in the customer's own words.
+ *
+ * The only account of a delivery that does not come from the people who made
+ * it — a driver who is quick and careful and one who leaves cartons in the
+ * rain look identical in a box count.
+ *
+ * Stars are tappable at 44px because this is a phone held at a doorway, and
+ * the remark box is offered without being insisted on: "they carried it up
+ * without being asked" is worth more to the office than any number, and
+ * demanding a score first is how you lose it.
+ */
+function RateDelivery({
+  token,
+  data,
+}: {
+  token: string
+  data: { customer_rating: number | null; customer_remarks: string | null }
+}) {
+  const [rating, setRating] = useState<number | null>(data.customer_rating)
+  const [remarks, setRemarks] = useState(data.customer_remarks ?? '')
+  const [done, setDone] = useState(!!data.customer_rating || !!data.customer_remarks)
+  const [error, setError] = useState<string | null>(null)
+
+  const send = useMutation({
+    mutationFn: async () =>
+      (await api.post(`/track/${token}/rating`, { rating, remarks: remarks || null })).data,
+    onSuccess: () => {
+      setDone(true)
+      setError(null)
+    },
+    onError: (e) => setError(apiErrorMessage(e)),
+  })
+
+  return (
+    <Card className="px-5 py-4">
+      <h2 className="text-[14px] font-semibold">
+        {done ? 'Thank you' : 'How was the delivery?'}
+      </h2>
+      <p className="mt-0.5 text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+        {done
+          ? 'This goes straight to the office.'
+          : 'It goes straight to the office, and nobody at the door sees it.'}
+      </p>
+
+      <div className="mt-3 flex gap-1.5">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => {
+              setRating(n)
+              setDone(false)
+            }}
+            className="grid size-11 place-items-center rounded-full text-[20px]"
+            style={{
+              background: (rating ?? 0) >= n ? 'var(--accent-dim)' : 'var(--bg-elevated)',
+              color: (rating ?? 0) >= n ? 'var(--accent)' : 'var(--text-faint)',
+            }}
+            aria-label={`${n} out of 5`}
+          >
+            {(rating ?? 0) >= n ? '★' : '☆'}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-3">
+        <Textarea
+          rows={2}
+          placeholder="Anything worth telling the office? (optional)"
+          value={remarks}
+          onChange={(e) => {
+            setRemarks(e.target.value)
+            setDone(false)
+          }}
+        />
+      </div>
+
+      <ErrorNote>{error}</ErrorNote>
+
+      <Button
+        className="mt-3 w-full"
+        variant={done ? 'secondary' : 'primary'}
+        disabled={done || (rating === null && !remarks.trim())}
+        loading={send.isPending}
+        onClick={() => send.mutate()}
+      >
+        {done ? 'Sent' : 'Send'}
+      </Button>
+    </Card>
+  )
 }

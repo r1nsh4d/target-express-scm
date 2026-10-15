@@ -14,7 +14,7 @@ import {
   Route as RouteIcon,
   Wallet,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 
 import {
   Badge,
@@ -28,6 +28,7 @@ import {
   Spinner,
 } from '@/components/ui'
 import { PhotoInput } from '@/components/PhotoInput'
+import { ReturnedBoxes } from '@/components/ReturnedBoxes'
 import { UnloadingSheet } from '@/components/UnloadingSheet'
 import { ScanBoxesSheet } from '@/components/ScanBoxesSheet'
 import { multiStopMapsUrl, singleStopMapsUrl } from '@/lib/maps'
@@ -95,6 +96,10 @@ interface Earnings {
 }
 
 type Tab = 'home' | 'freights' | 'earnings'
+
+const RouteMap = lazy(() =>
+  import('@/components/RouteMap').then((m) => ({ default: m.RouteMap })),
+)
 
 export default function DriverPortalPage() {
   const { user, logout } = useAuth()
@@ -378,6 +383,25 @@ function FreightDetail({ id, onBack }: { id: string; onBack: () => void }) {
           </p>
         ) : null}
 
+        {/* The shape of the day.
+            Google Maps is still the right thing for actually driving — it
+            knows the roads and this does not. What was missing is how many
+            stops, in what order, how far apart and which are done: a list of
+            six towns does not tell a driver he is about to double back. The
+            numbers are the delivery order and the grey ones are finished. */}
+        <div className="mt-4">
+          <Suspense fallback={<div className="skeleton" style={{ height: 240 }} />}>
+            <RouteMap
+              stops={trip.points}
+              origin={
+                trip.origin_latitude != null
+                  ? { latitude: trip.origin_latitude, longitude: trip.origin_longitude }
+                  : null
+              }
+            />
+          </Suspense>
+        </div>
+
         <div className="mt-4 grid grid-cols-3 gap-3 text-center">
           {[
             [String(trip.points.length), 'points'],
@@ -444,6 +468,14 @@ function FreightDetail({ id, onBack }: { id: string; onBack: () => void }) {
           />
         ))}
       </div>
+
+      {/* Before the odometer, deliberately. Closing the trip is the last
+          action, and anything still on the vehicle has to be accounted for
+          before it — otherwise it is counted the next morning, by which time
+          it has had a night to be misremembered. */}
+      {trip.start_odometer !== null && trip.end_odometer === null ? (
+        <ReturnedBoxes freightId={trip.id} />
+      ) : null}
 
       {trip.start_odometer !== null && trip.end_odometer === null ? (
         <OdometerCard

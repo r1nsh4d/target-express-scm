@@ -89,6 +89,10 @@ class TrackingOut(BaseModel):
     driver_phone: str | None
     delivery_photo_url: str | None
     receiver_name: str | None
+    # What they have already said, so the page shows it back rather than
+    # asking twice.
+    customer_rating: int | None = None
+    customer_remarks: str | None = None
 
 
 class LocationUpdateIn(BaseModel):
@@ -291,8 +295,72 @@ def track(token: str, db: Session = Depends(get_db)) -> TrackingOut:
         distance_km=distance_km,
         eta_minutes=eta_minutes,
         driver_phone=driver_phone,
+        customer_rating=point.customer_rating,
+        customer_remarks=point.customer_remarks,
         delivery_photo_url=point.delivery_photo_url,
         receiver_name=point.receiver_name if delivered else None,
+    )
+
+
+class RatingIn(BaseModel):
+    # One to five. Nullable on the way in too: somebody may want to leave a
+    # remark without scoring anybody, and refusing that loses the remark.
+    rating: int | None = Field(default=None, ge=1, le=5)
+    remarks: str | None = Field(default=None, max_length=1000)
+
+
+class RatingOut(BaseModel):
+    rating: int | None
+    remarks: str | None
+    message: str
+
+
+@router.post("/{token}/rating", response_model=RatingOut)
+def rate_delivery(token: str, payload: RatingIn, db: Session = Depends(get_db)) -> RatingOut:
+    """How the delivery went, in the consignee's own words.
+
+    The only account of a delivery that does not come from the people who made
+    it. A driver who is quick and careful and one who leaves cartons in the
+    rain look identical in a box count, and the office has no other way to tell
+    them apart.
+
+    Only after the goods are in. Rating a delivery that has not happened is
+    either a mistake or somebody rating the wait, and neither is what this
+    measures.
+
+    It can be changed while the link lives. Somebody who taps a star by
+    accident on a phone should be able to put it right, and a rating nobody
+    can correct is a rating nobody trusts.
+    """
+    session = _session(db, token)
+    point = db.get(FreightPoint, session.freight_point_id)
+    if point is None:
+        raise HTTPException(status_code=404, detail="This tracking link is no longer active.")
+
+    if point.status not in (
+        FreightPointStatus.DELIVERED,
+        FreightPointStatus.PART_DELIVERED,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="You can rate the delivery once the goods have been handed over.",
+        )
+
+    if payload.rating is None and not (payload.remarks or "").strip():
+        raise HTTPException(status_code=422, detail="Leave a rating or a remark.")
+
+    if payload.rating is not None:
+        point.customer_rating = payload.rating
+    if payload.remarks is not None:
+        point.customer_remarks = payload.remarks.strip() or None
+    point.rated_at = datetime.now()
+    db.commit()
+    db.refresh(point)
+
+    return RatingOut(
+        rating=point.customer_rating,
+        remarks=point.customer_remarks,
+        message="Thank you — this goes straight to the office.",
     )
 
 

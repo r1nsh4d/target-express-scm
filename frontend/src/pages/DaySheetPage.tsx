@@ -11,6 +11,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+import { SheetDrop } from '@/components/SheetDrop'
 import { Button, Card, ErrorNote, Input, Select, Spinner, Textarea } from '@/components/ui'
 import { api, apiErrorMessage } from '@/lib/api'
 import type { Consignee, VendorDivision, Warehouse } from '@/lib/resources'
@@ -316,6 +317,14 @@ export default function DaySheetPage() {
               </button>
             ) : null}
           </div>
+          {/* Above the typing box, and outside the scanning wrapper — the
+              beam belongs to the parse, not to choosing a file. */}
+          <SheetDrop
+            onRead={(lines) =>
+              setText((current) => (current ? `${current}\n${lines}` : lines))
+            }
+          />
+
           <div className={doParse.isPending ? 'tx-scan rounded-[var(--radius-control)]' : ''}>
           <Textarea
             rows={14}

@@ -21,7 +21,7 @@ from __future__ import annotations
 import secrets
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -41,6 +41,7 @@ from app.models.freight import Freight, FreightPoint
 from app.models.user import User
 from app.models.vendor import VendorDivision, VendorWarehouse
 from app.services import daysheet
+from app.services.sheetread import read_sheet, to_lines
 from app.api.routes.freights import _next_trip_no
 
 router = APIRouter(prefix="/api/daysheet", tags=["daysheet"])
@@ -86,6 +87,95 @@ class ParseOut(BaseModel):
     box_count: int
     stop_count: int
     needs_attention: int
+
+
+class SheetPreviewOut(BaseModel):
+    columns: list[str]
+    # A handful of rows, enough to recognise the file without shipping five
+    # thousand of them to a browser.
+    sample: list[list[str]]
+    row_count: int
+    # column index -> field name, as far as the headers could be read. A
+    # guess, shown for confirmation, never a decision already taken.
+    mapping: dict[int, str]
+    sheet_name: str | None
+    notes: list[str]
+
+
+@router.post("/upload", response_model=SheetPreviewOut)
+async def upload_sheet(file: UploadFile = File(...), _=OpsDep) -> SheetPreviewOut:
+    """Read the vendor's spreadsheet and say what the columns look like.
+
+    Creates nothing, and decides nothing. Every vendor's file is laid out
+    differently — the bill number is in column B for one and column A for
+    another, and the header is rarely the first row because there is a logo
+    above it. So the columns are guessed and shown, the person confirms, and
+    only then are bills made. Being quietly wrong about which column is the
+    box count puts the wrong number on a sticker a driver counts against.
+    """
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="That file is empty.")
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail="That file is larger than 8 MB — a day sheet should not be.",
+        )
+
+    try:
+        read = read_sheet(data, file.filename or "")
+    except Exception:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Could not read that file. Save it as .xlsx or .csv and try again."
+            ),
+        ) from None
+
+    if not read.rows:
+        raise HTTPException(status_code=422, detail="There are no rows in that file.")
+
+    return SheetPreviewOut(
+        columns=read.columns,
+        sample=[[str(c) for c in row] for row in read.rows[:8]],
+        row_count=len(read.rows),
+        mapping=read.mapping,
+        sheet_name=read.sheet_name,
+        notes=read.notes,
+    )
+
+
+class SheetToLinesIn(BaseModel):
+    # Sent back after the person has confirmed or corrected the mapping.
+    mapping: dict[int, str]
+
+
+@router.post("/upload/lines", response_model=dict)
+async def sheet_to_lines(
+    mapping: str = Form(...), file: UploadFile = File(...), _=OpsDep
+) -> dict:
+    """Turn the mapped columns into the lines the day sheet already reads.
+
+    The file is sent again rather than held on the server between the two
+    calls. A day sheet is small, and a half-uploaded file sitting in memory
+    waiting for somebody to come back from lunch is a problem nobody needs.
+
+    It produces the same one-bill-per-line text somebody would have typed,
+    which the existing parser then reads. Deliberately reusing it: it already
+    matches misspelt customer names, catches duplicate bills and handles a
+    missing count, and two code paths that both turn a row into a bill is two
+    places for them to disagree about what a bill is.
+    """
+    import json
+
+    try:
+        chosen = {int(k): v for k, v in json.loads(mapping).items()}
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=422, detail="The column mapping is malformed.") from None
+
+    data = await file.read()
+    read = read_sheet(data, file.filename or "")
+    return {"text": "\n".join(to_lines(read, chosen))}
 
 
 @router.post("/parse", response_model=ParseOut)

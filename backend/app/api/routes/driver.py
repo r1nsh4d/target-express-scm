@@ -26,6 +26,7 @@ from app.models.tracking import VehiclePing
 from app.models.freight import Freight, FreightLeg, FreightPoint, PointUnloadingItem
 from app.models.settlement import Advance, FreightPayout
 from app.models.user import User
+from app.services.controls import reconcile_boxes
 from app.services.rating import money
 from app.services.unloading import (
     UnloadItem,
@@ -204,6 +205,17 @@ def _trip_out(db: Session, leg: FreightLeg) -> TripOut:
         else None,
         points=_points_of(db, freight.id),
     )
+
+
+def _load_driver_freight(db: Session, freight_id: str, user: User) -> Freight:
+    """The freight, if this driver is on it."""
+    freight = db.get(Freight, freight_id)
+    if freight is None:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    driver = _driver_for(db, user)
+    if not any(leg.driver_id == driver.id for leg in freight.legs):
+        raise HTTPException(status_code=403, detail="This trip is not assigned to you")
+    return freight
 
 
 @router.get("/today", response_model=TripOut)
@@ -399,6 +411,126 @@ def record_pings(
         )
 
     db.commit()
+
+
+class ReturnScanIn(BaseModel):
+    code: str = Field(min_length=1, max_length=120)
+    # What happened to it. Refused at the door is the common one; damaged
+    # matters more, because somebody has to be told before it is put back on
+    # a shelf as good stock.
+    status: BoxStatus = BoxStatus.RETURNED_TO_WAREHOUSE
+    reason: str = Field(default="Came back on the vehicle", max_length=500)
+
+
+class ReturnScanOut(BaseModel):
+    result: str
+    message: str
+    barcode: str | None = None
+    bill_no: str | None = None
+    item_name: str | None = None
+    # How the freight now reconciles, so the driver can see when he is done
+    # rather than counting the pile himself.
+    loaded: int
+    delivered: int
+    returned: int
+    unaccounted: int
+
+
+@router.post("/freights/{freight_id}/returns", response_model=ReturnScanOut)
+def scan_returned_box(
+    freight_id: str,
+    payload: ReturnScanIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.DRIVER)),
+) -> ReturnScanOut:
+    """A carton coming back off the vehicle at the warehouse.
+
+    The last thing a trip needs before it closes: everything loaded was either
+    delivered or came back, and until both halves are recorded the difference
+    is "unaccounted" — which should mean a box nobody can find, not one
+    standing in the godown.
+
+    The driver does it rather than the office because he is the one unloading
+    the vehicle, and a carton counted the next morning has already had a night
+    to be misremembered.
+
+    Never raises for a bad scan, for the same reason the delivery scanner does
+    not: a man holding a carton in one hand needs a verdict on the screen, not
+    an error dialog. Every outcome comes back 200 with a result the phone can
+    colour.
+    """
+    freight = _load_driver_freight(db, freight_id, user)
+
+    code = payload.code.strip().upper()
+    box = (
+        db.execute(
+            select(Box)
+            .join(Consignment, Box.consignment_id == Consignment.id)
+            .join(FreightPoint, Consignment.freight_point_id == FreightPoint.id)
+            .where(FreightPoint.freight_id == freight.id, func.upper(Box.barcode) == code)
+        )
+        .scalars()
+        .first()
+    )
+
+    def reconciled(result: str, message: str, found: Box | None = None) -> ReturnScanOut:
+        counts = reconcile_boxes(db, str(freight.id))
+        return ReturnScanOut(
+            result=result,
+            message=message,
+            barcode=found.barcode if found else None,
+            bill_no=found.consignment.vendor_bill_no if found and found.consignment else None,
+            item_name=found.item_name if found else None,
+            loaded=counts.loaded,
+            delivered=counts.delivered,
+            returned=counts.returned,
+            unaccounted=counts.unaccounted,
+        )
+
+    if box is None:
+        # Either somebody else's carton or a misread sticker. Both are things
+        # to say, not things to fail on.
+        return reconciled("UNKNOWN", "That sticker is not on this trip.")
+
+    if box.returned_at is not None:
+        return reconciled("ALREADY", "Already recorded as returned.", box)
+
+    if box.status == BoxStatus.DELIVERED:
+        # Worth stopping on. A carton marked delivered that is physically on
+        # the lorry means the delivery record is wrong, and quietly flipping
+        # it would hide that.
+        return reconciled(
+            "WAS_DELIVERED",
+            "This was marked delivered. Tell the office before putting it back.",
+            box,
+        )
+
+    box.status = payload.status
+    box.return_reason = payload.reason.strip() or "Came back on the vehicle"
+    box.returned_at = datetime.now()
+    box.returned_by_id = user.id
+    db.commit()
+
+    return reconciled("OK", "Recorded as returned.", box)
+
+
+@router.get("/freights/{freight_id}/reconciliation", response_model=ReturnScanOut)
+def freight_reconciliation(
+    freight_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.DRIVER)),
+) -> ReturnScanOut:
+    """Where the count stands, without scanning anything."""
+    freight = _load_driver_freight(db, freight_id, user)
+    counts = reconcile_boxes(db, str(freight.id))
+    return ReturnScanOut(
+        result="COUNT",
+        message="",
+        loaded=counts.loaded,
+        delivered=counts.delivered,
+        returned=counts.returned,
+        unaccounted=counts.unaccounted,
+    )
 
 
 @router.post("/legs/{leg_id}/close", status_code=status.HTTP_204_NO_CONTENT)

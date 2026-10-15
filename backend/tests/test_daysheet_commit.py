@@ -556,3 +556,143 @@ def test_two_bills_for_the_same_new_customer_make_one_customer(client, setup, au
     body = res.json()
     assert body["customers_created"] == 1, "created the same dealer twice"
     assert body["stop_count"] == 1, "one customer is one stop, however many bills"
+
+
+# ---------------------------------------------------------------------------
+# The vendor's spreadsheet, end to end
+# ---------------------------------------------------------------------------
+
+
+def _vendor_xlsx() -> bytes:
+    """A file shaped the way one actually arrives: letterhead, blank row,
+    header, then the day's bills."""
+    import io
+
+    from openpyxl import Workbook
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "Dispatch"
+    for row in (
+        ["GODREJ INTERIO", "", "", ""],
+        ["Dispatch summary", "", "", ""],
+        [],
+        ["Bill No", "Consignee", "No of Boxes", "Article"],
+        ["GDJ/9201", "Kannur DC", 6, "Chair"],
+        ["GDJ/9202", "kozikode srvce", 4, "Table"],
+        ["GDJ/9203", "Rinshad Km", 2, ""],
+    ):
+        sheet.append(row)
+    buffer = io.BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
+
+
+def test_the_columns_are_guessed_and_reported(client, setup, auth):
+    res = client.post(
+        "/api/daysheet/upload",
+        files={"file": ("godrej.xlsx", _vendor_xlsx(), "application/vnd.ms-excel")},
+        headers=auth,
+    )
+    assert res.status_code == 200, res.text
+
+    body = res.json()
+    assert body["row_count"] == 3
+    assert body["mapping"] == {
+        "0": "vendor_bill_no",
+        "1": "customer",
+        "2": "box_count",
+        "3": "item_name",
+    }
+
+
+def test_nothing_is_created_by_uploading(client, setup, auth):
+    """The guess is shown for confirmation, never acted on."""
+    client.post(
+        "/api/daysheet/upload",
+        files={"file": ("godrej.xlsx", _vendor_xlsx(), "application/vnd.ms-excel")},
+        headers=auth,
+    )
+    assert client.get("/api/consignments", headers=auth).json() == []
+
+
+def test_the_confirmed_mapping_becomes_lines_the_parser_reads(client, setup, auth):
+    import json
+
+    res = client.post(
+        "/api/daysheet/upload/lines",
+        files={"file": ("godrej.xlsx", _vendor_xlsx(), "application/vnd.ms-excel")},
+        data={
+            "mapping": json.dumps(
+                {"0": "vendor_bill_no", "1": "customer", "2": "box_count", "3": "item_name"}
+            )
+        },
+        headers=auth,
+    )
+    assert res.status_code == 200, res.text
+
+    lines = res.json()["text"].splitlines()
+    assert lines[0] == "GDJ/9201 Kannur DC 6 Chair"
+    assert lines[2] == "GDJ/9203 Rinshad Km 2"
+
+
+def test_a_spreadsheet_becomes_a_freight(client, setup, auth):
+    """The whole point: a file the vendor sent, and a freight ready to label,
+    with the same fuzzy matching the typed path already had — "Kannur DC" and
+    "kozikode srvce" both find their branch."""
+    import json
+
+    text = client.post(
+        "/api/daysheet/upload/lines",
+        files={"file": ("godrej.xlsx", _vendor_xlsx(), "application/vnd.ms-excel")},
+        data={
+            "mapping": json.dumps(
+                {"0": "vendor_bill_no", "1": "customer", "2": "box_count", "3": "item_name"}
+            )
+        },
+        headers=auth,
+    ).json()["text"]
+
+    parsed = client.post(
+        "/api/daysheet/parse",
+        json={"text": text, "vendor_division_id": setup["division"]},
+        headers=auth,
+    ).json()
+    assert parsed["needs_attention"] == 0, parsed["lines"]
+    assert parsed["box_count"] == 12
+
+    res = client.post(
+        "/api/daysheet/commit",
+        json={
+            "vendor_division_id": setup["division"],
+            "warehouse_id": setup["warehouse"],
+            "rows": _rows_from(parsed),
+            "create_freight": True,
+        },
+        headers=auth,
+    )
+    assert res.status_code == 201, res.text
+
+    out = res.json()
+    assert out["consignment_count"] == 3
+    assert out["box_count"] == 12
+
+    labels = client.get(f"/api/freights/{out['freight_id']}/labels", headers=auth).json()
+    assert len(labels) == 12, "the stickers are not ready"
+
+
+def test_an_empty_file_is_refused_politely(client, setup, auth):
+    res = client.post(
+        "/api/daysheet/upload",
+        files={"file": ("nothing.xlsx", b"", "application/vnd.ms-excel")},
+        headers=auth,
+    )
+    assert res.status_code == 422
+
+
+def test_uploading_needs_a_login(client, setup):
+    res = client.post(
+        "/api/daysheet/upload",
+        files={"file": ("godrej.xlsx", _vendor_xlsx(), "application/vnd.ms-excel")},
+    )
+    assert res.status_code == 401
