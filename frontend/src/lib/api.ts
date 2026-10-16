@@ -5,6 +5,11 @@ const TOKEN_KEY = 'tx.token'
 export const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
+  /* Repeat the key for a list, rather than axios's default `ids[]=a&ids[]=b`.
+     FastAPI reads `?ids=a&ids=b` into a list and treats `ids[]` as a
+     differently-named parameter it was never given — which arrives as an
+     empty list and looks, on screen, exactly like "there is nothing here". */
+  paramsSerializer: { indexes: null },
 })
 
 export function getToken(): string | null {

@@ -16,6 +16,7 @@ import {
   Spinner,
 } from '@/components/ui'
 import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
+import { DriverDetail } from '@/components/Profiles'
 import { RowActions } from '@/components/RowActions'
 import { apiErrorMessage } from '@/lib/api'
 import type { Driver, Vehicle } from '@/lib/resources'
@@ -24,6 +25,7 @@ import { useOpenOnNewParam } from '@/lib/motion'
 
 export default function DriversPage() {
   const [open, setOpen] = useState(false)
+  const [viewing, setViewing] = useState<string | null>(null)
 
   // The command palette's "New …" lands here with ?new=1.
   useOpenOnNewParam(useCallback(() => setOpen(true), []))
@@ -51,6 +53,7 @@ export default function DriversPage() {
         <TileGrid
           rows={drivers.data ?? []}
           rowKey={(d) => d.id}
+          onRowClick={(d) => setViewing(d.id)}
           empty={
             <EmptyState
               icon={<UserRound className="size-7" />}
@@ -103,10 +106,15 @@ export default function DriversPage() {
                   tone={d.user_id ? 'success' : 'warning'}
                 />
               </Facts>
+              <p className="mt-2.5 text-[11.5px]" style={{ color: 'var(--text-faint)' }}>
+                Open for his trips, earnings, settlements and advances
+              </p>
             </>
           )}
         />
       )}
+
+      <DriverDetail driverId={viewing} open={viewing !== null} onClose={() => setViewing(null)} />
 
       <DriverForm open={open} onClose={() => setOpen(false)} vehicles={vehicles.data ?? []} />
     </div>

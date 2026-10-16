@@ -17,6 +17,8 @@ import {
   Spinner,
   Table,
 } from '@/components/ui'
+import type { ChargeSheetData } from '@/components/ChargeSheet'
+import { ChargeSheet } from '@/components/ChargeSheet'
 import type { Company } from '@/components/TaxInvoice'
 import { TaxInvoice } from '@/components/TaxInvoice'
 import { api, apiErrorMessage } from '@/lib/api'
@@ -466,6 +468,12 @@ function GenerateModal({
                 </p>
               ) : null}
             </div>
+
+            {/* What will be stapled behind the bill, before it exists. A sheet
+                with an unpriced article on it is money being given away, and
+                the moment to notice is now rather than after the invoice has
+                gone to Godrej. */}
+            <SheetsToAttach freightIds={[...chosen]} />
           </div>
         ) : null}
 
@@ -490,6 +498,68 @@ function GenerateModal({
         </div>
       </div>
     </Modal>
+  )
+}
+
+/* The unloading sheets that will go behind this invoice, before it is made.
+ *
+ * A summary rather than the forms themselves: at this point the question is
+ * "is this right to send", not "what does the paper look like". One line per
+ * delivery, the dealer and the bill it is against, and anything that needs a
+ * second look called out — an article carried but never priced is money given
+ * away, and the moment to catch it is before the bill goes to the vendor.
+ */
+function SheetsToAttach({ freightIds }: { freightIds: string[] }) {
+  const sheets = useList<ChargeSheetData>(
+    '/unloading-sheets',
+    { freight_ids: freightIds },
+    freightIds.length > 0,
+  )
+
+  if (!freightIds.length || sheets.isLoading || !sheets.data?.length) return null
+
+  const total = sheets.data.reduce((sum, s) => sum + Number(s.billed_total), 0)
+  const unpriced = sheets.data.filter((s) => s.unpriced_item_codes.length)
+  const disagreeing = sheets.data.filter((s) => !s.agrees_with_invoice)
+
+  return (
+    <div className="inset space-y-2 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-[13px] font-medium">
+          {sheets.data.length} unloading{' '}
+          {sheets.data.length === 1 ? 'sheet' : 'sheets'} will be attached
+        </p>
+        <span className="tnum text-[13px]">{rupees(total.toFixed(2))}</span>
+      </div>
+
+      <div className="space-y-1">
+        {sheets.data.map((s) => (
+          <div key={s.point_id} className="flex items-baseline justify-between gap-3 text-[12px]">
+            <span className="min-w-0 truncate" style={{ color: 'var(--text-muted)' }}>
+              {s.customer_name}
+              {s.vendor_bill_nos.length ? ` · ${s.vendor_bill_nos.join(', ')}` : ''} ·{' '}
+              {s.item_count} {s.item_count === 1 ? 'item' : 'items'}
+              {s.floor_number > 0 ? `, floor ${s.floor_number}` : ''}
+            </span>
+            <span className="tnum shrink-0">{rupees(s.billed_total)}</span>
+          </div>
+        ))}
+      </div>
+
+      {unpriced.length ? (
+        <p className="pt-1 text-[12px]" style={{ color: 'var(--danger)' }}>
+          {unpriced.length} {unpriced.length === 1 ? 'sheet has' : 'sheets have'} an article with
+          no rate on file, billed as nothing:{' '}
+          {[...new Set(unpriced.flatMap((s) => s.unpriced_item_codes))].join(', ')}.
+        </p>
+      ) : null}
+      {disagreeing.length ? (
+        <p className="pt-1 text-[12px]" style={{ color: 'var(--warning)' }}>
+          {disagreeing.length} {disagreeing.length === 1 ? 'sheet does' : 'sheets do'} not add up
+          to what was charged. Worth checking before this goes out.
+        </p>
+      ) : null}
+    </div>
   )
 }
 
@@ -652,6 +722,12 @@ function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
         <div className="skeleton h-96" />
       )}
 
+      {/* The working behind the unloading line, as the forms the dealers
+          signed. They print with the invoice because that is how the vendor
+          receives them today — on paper, stapled behind the bill. */}
+      <InvoiceSheets invoiceId={id} companyName={company.data?.name ?? ''} />
+
+
       <Modal
         open={editing}
         onClose={() => {
@@ -769,6 +845,62 @@ function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
           </div>
         </div>
       </Modal>
+    </div>
+  )
+}
+
+/* The unloading charge sheets behind an invoice.
+ *
+ * The invoice says the vendor owes 4,200 for unloading across seven trips.
+ * These say which dealer, which bill, which floor and which articles made up
+ * every rupee of it — and they are the documents the vendor's people already
+ * recognise, because Target Express hands them over on paper today.
+ *
+ * Printed one to a page behind the invoice, so "Print / PDF" produces the
+ * whole packet rather than the covering page of it.
+ */
+function InvoiceSheets({ invoiceId, companyName }: { invoiceId: string; companyName: string }) {
+  const sheets = useList<ChargeSheetData>(`/invoices/${invoiceId}/unloading-sheets`)
+
+  if (sheets.isLoading) return <div className="skeleton h-32 print:hidden" />
+  if (!sheets.data?.length) return null
+
+  const total = sheets.data.reduce((sum, s) => sum + Number(s.billed_total), 0)
+  const queries = sheets.data.filter((s) => !s.agrees_with_invoice || s.unpriced_item_codes.length)
+
+  return (
+    <div className="space-y-5">
+      <div className="tx-sheet-page">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-[15px] font-semibold">
+            Annexure — unloading charge sheets
+          </h2>
+          <p className="tnum text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+            {sheets.data.length} {sheets.data.length === 1 ? 'point' : 'points'} ·{' '}
+            {rupees(total.toFixed(2))}
+          </p>
+        </div>
+        <p className="mt-1 text-[12.5px] print:hidden" style={{ color: 'var(--text-muted)' }}>
+          One per delivery point, printed behind the invoice. This is the working the vendor
+          checks the unloading line against.
+        </p>
+
+        {queries.length ? (
+          <p
+            className="mt-2 rounded-[var(--radius-control)] px-3.5 py-2.5 text-[12.5px] print:hidden"
+            style={{ background: 'color-mix(in oklab, var(--warning) 12%, transparent)' }}
+          >
+            {queries.length} {queries.length === 1 ? 'sheet needs' : 'sheets need'} a look before
+            this goes out — marked below.
+          </p>
+        ) : null}
+      </div>
+
+      {sheets.data.map((sheet) => (
+        <div key={sheet.point_id} className="tx-sheet-page">
+          <ChargeSheet sheet={sheet} companyName={companyName} />
+        </div>
+      ))}
     </div>
   )
 }

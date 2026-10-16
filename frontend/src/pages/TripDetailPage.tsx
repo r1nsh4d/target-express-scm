@@ -12,6 +12,7 @@ import {
   GitBranch,
   Package,
   Pencil,
+  Printer,
   Send,
   Truck,
 } from 'lucide-react'
@@ -32,6 +33,8 @@ import {
   Spinner,
   Textarea,
 } from '@/components/ui'
+import type { ChargeSheetData } from '@/components/ChargeSheet'
+import { ChargeSheet } from '@/components/ChargeSheet'
 import { EditTripModal, OverrideStatusModal } from '@/components/TripEditModals'
 import { api, apiErrorMessage } from '@/lib/api'
 import { BRAND } from '@/lib/brand'
@@ -469,6 +472,8 @@ export default function TripDetailPage() {
             </Card>
           ) : null}
 
+          <UnloadingSheets freightId={t.id} />
+
           <TripAccount path={path} />
 
           {t.legs.length ? (
@@ -573,6 +578,68 @@ export default function TripDetailPage() {
         onDone={refresh}
       />
     </div>
+  )
+}
+
+/* The unloading charge sheets this trip produced.
+ *
+ * Here rather than only on the invoice, because the query a driver or a
+ * dealer raises is about one run — "what did you charge us at Kottayam on the
+ * 8th" — and reaching that through the invoice it was later folded into is
+ * the long way round. Printing from here gives the dealer their copy without
+ * sending the whole month's bill with it.
+ */
+function UnloadingSheets({ freightId }: { freightId: string }) {
+  const company = useItem<{ name: string }>('/company')
+  const sheets = useList<ChargeSheetData>(`/freights/${freightId}/unloading-sheets`)
+  const [showing, setShowing] = useState(false)
+
+  if (!sheets.data?.length) return null
+
+  const total = sheets.data.reduce((sum, s) => sum + Number(s.billed_total), 0)
+
+  return (
+    <>
+      <Card className="p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-[13.5px] font-semibold">Unloading charge sheets</h3>
+            <p className="mt-0.5 text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+              {sheets.data.length} {sheets.data.length === 1 ? 'point' : 'points'} ·{' '}
+              {rupees(total.toFixed(2))} billed
+            </p>
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => setShowing(true)}>
+            View &amp; print
+          </Button>
+        </div>
+      </Card>
+
+      <Modal
+        open={showing}
+        onClose={() => setShowing(false)}
+        wide
+        printable
+        title="Unloading charge sheets"
+        description="One per delivery point, as the dealer signed it."
+      >
+        <div className="space-y-5">
+          {sheets.data.map((sheet) => (
+            <div key={sheet.point_id} className="tx-sheet-page">
+              <ChargeSheet sheet={sheet} companyName={company.data?.name ?? ''} />
+            </div>
+          ))}
+          <div className="flex justify-end gap-2 print:hidden">
+            <Button variant="secondary" onClick={() => setShowing(false)}>
+              Close
+            </Button>
+            <Button icon={<Printer className="size-4" />} onClick={() => window.print()}>
+              Print
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </>
   )
 }
 

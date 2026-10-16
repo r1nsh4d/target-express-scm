@@ -733,6 +733,25 @@
       padding: 0 !important;
     }
 
+    /* --- the invoice packet --------------------------------------------- */
+
+    /* An invoice goes to the vendor with its unloading charge sheets behind
+       it, one per delivery point, because that is how Target Express hands
+       them over today — stapled. Each starts its own page: a sheet split
+       across a fold is one the dealer's accounts team queries rather than
+       files, and the signature block has to sit under the amount it signs
+       for. */
+    .tx-sheet-page {
+      break-before: page;
+      page-break-before: always;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .tx-charge-sheet {
+      box-shadow: none !important;
+    }
+
     @page {
       margin: 8mm;
     }

@@ -190,17 +190,28 @@ def test_retiring_a_driver_disables_his_login(client, auth, driver):
 
 
 # ---------------------------------------------------------------------------
-# Rate cards stay immutable
+# Rate cards freeze once they have billed
 # ---------------------------------------------------------------------------
 
 
-def test_a_rate_card_cannot_be_edited(client):
-    """A rate agreed in April must still price an April freight in December.
-    Editing a card would reprice work already invoiced against it."""
+def test_a_rate_card_can_be_corrected_before_it_bills(client):
+    """A typo and a rate change are not the same act.
+
+    This used to assert that no PATCH existed at all, on the reasoning that a
+    rate agreed in April must still price an April freight in December. That
+    reasoning holds for rate CHANGES and not for typos: a transposed digit
+    found before any invoice went out meant retiring the card and re-keying
+    eleven fields, which is how a master list stops being trusted.
+
+    The line moved to the invoice. The refusal once a card HAS billed, which
+    is the part that protects history, is held by `test_rate_card_edit.py`.
+    """
     from app.main import app
 
     paths = app.openapi()["paths"]
-    assert "patch" not in paths.get("/api/rate-cards/{item_id}", {})
+    assert "patch" in paths.get("/api/rate-cards/{item_id}", {})
+    # And the screen can ask which state a card is in before offering a form.
+    assert "get" in paths.get("/api/rate-cards/{item_id}/usage", {})
 
 
 def test_a_rate_card_can_be_retired(client):

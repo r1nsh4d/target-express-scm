@@ -5,6 +5,7 @@ from app.api.routes import (
     advances,
     auth,
     billing,
+    chargesheets,
     company,
     consignments,
     dashboard,
@@ -17,6 +18,7 @@ from app.api.routes import (
     masters_edit,
     nextsteps,
     presets,
+    profiles,
     public,
     reports,
     roles,
@@ -48,6 +50,7 @@ app.include_router(driver.router)
 app.include_router(advances.router)
 app.include_router(masters.router)
 app.include_router(masters_edit.router)
+app.include_router(profiles.router)
 app.include_router(presets.router)
 # Registered after masters so /api/freights/{id}/account from advances keeps
 # working alongside the freight lifecycle routes.
@@ -55,6 +58,7 @@ app.include_router(freights.router)
 app.include_router(consignments.router)
 app.include_router(daysheet.router)
 app.include_router(billing.router)
+app.include_router(chargesheets.router)
 app.include_router(returns.router)
 app.include_router(reports.router)
 app.include_router(nextsteps.router)

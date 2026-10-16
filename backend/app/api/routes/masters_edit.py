@@ -29,6 +29,7 @@ RATE CARDS ARE NOT EDITABLE
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -38,6 +39,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import ADMIN_ROLES, WAREHOUSE_ROLES, require_roles
 from app.db.session import get_db
+from app.models.billing import VendorInvoiceLine
 from app.models.consignee import Consignee
 from app.models.consignment import Consignment
 from app.models.fleet import (
@@ -446,27 +448,120 @@ def retire_labour(item_id: uuid.UUID, db: Session = Depends(get_db), _=OpsDep):
 
 
 # --------------------------------------------------------------------------- #
-# Rates — retire only                                                          #
+# Rates                                                                        #
 # --------------------------------------------------------------------------- #
+
+
+def _rate_card_is_locked(db: Session, card_id: uuid.UUID) -> int:
+    """How many issued invoices this card has priced.
+
+    Nonzero means it is locked. The test is deliberately "has it priced an
+    invoice", not "has any freight used it": a dispatched freight carries a
+    frozen copy of the card's numbers in `rate_snapshot`, so correcting the
+    card cannot move a price that has already been struck. What it must never
+    do is move a price the vendor has already been sent.
+    """
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(VendorInvoiceLine)
+            .join(Freight, Freight.id == VendorInvoiceLine.freight_id)
+            .where(Freight.rate_card_id == card_id)
+        )
+        or 0
+    )
+
+
+class RateCardPatch(BaseModel):
+    """Correcting a card, not changing a rate.
+
+    These are two different things and the endpoint treats them differently.
+
+    A TYPO is a correction. Somebody has just entered Godrej OCP at 1,687
+    instead of 1,867 and no invoice has gone out on it. Making them retire the
+    card and re-key eleven fields to fix one transposed digit is how a master
+    list stops being trusted — and the old behaviour, which was to offer no
+    edit at all, is exactly that.
+
+    A RATE CHANGE is a new agreement, and it is still a new card dated from the
+    day it starts. A card that has already priced an invoice is refused here,
+    with the reason, because editing it would reprice work the vendor has
+    already been sent a bill for and the two copies would stop reconciling.
+
+    So: freely editable until it has billed something, then frozen. The screen
+    shows which state a card is in rather than letting somebody find out from
+    an error.
+    """
+
+    vehicle_type_id: uuid.UUID | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
+    base_trip_amount: Decimal | None = Field(default=None, ge=0)
+    included_km: int | None = Field(default=None, ge=0)
+    extra_km_rate: Decimal | None = Field(default=None, ge=0)
+    base_point_charge: Decimal | None = Field(default=None, ge=0)
+    included_points: int | None = Field(default=None, ge=0)
+    extra_point_rate: Decimal | None = Field(default=None, ge=0)
+    unloading_basis: str | None = Field(default=None, max_length=32)
+    unloading_rate: Decimal | None = Field(default=None, ge=0)
+    notes: str | None = None
+
+
+@router.patch("/rate-cards/{item_id}")
+def update_rate_card(
+    item_id: uuid.UUID, payload: RateCardPatch, db: Session = Depends(get_db), _=WriteDep
+):
+    card = _load(db, RateCard, item_id, "Rate card")
+
+    invoiced = _rate_card_is_locked(db, card.id)
+    if invoiced:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This card has already priced {invoiced} invoiced "
+                f"{'freight' if invoiced == 1 else 'freights'}. Editing it would reprice "
+                "work the vendor has been billed for. Add a new card dated from the day "
+                "the new rate starts instead — freights before that keep this one."
+            ),
+        )
+
+    _apply(card, payload)
+    db.commit()
+    db.refresh(card)
+    return {"id": str(card.id), "effective_from": card.effective_from.isoformat()}
+
+
+@router.get("/rate-cards/{item_id}/usage")
+def rate_card_usage(item_id: uuid.UUID, db: Session = Depends(get_db), _=WriteDep):
+    """Whether this card can still be corrected, and why not if it cannot.
+
+    The screen asks before showing an edit button, so somebody is told the
+    card is frozen before they have filled in a form, not after.
+    """
+    card = _load(db, RateCard, item_id, "Rate card")
+    invoiced = _rate_card_is_locked(db, card.id)
+    freights = int(
+        db.scalar(
+            select(func.count()).select_from(Freight).where(Freight.rate_card_id == card.id)
+        )
+        or 0
+    )
+    return {"invoiced_freights": invoiced, "freights": freights, "editable": invoiced == 0}
 
 
 @router.delete("/rate-cards/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def retire_rate_card(item_id: uuid.UUID, db: Session = Depends(get_db), _=WriteDep):
-    """Retire a rate card. There is deliberately no PATCH.
+    """Retire a rate card.
 
     A rate agreed in April must still price an April freight in December.
-    Editing a card would silently reprice freights already invoiced against it,
-    and the vendor's copy of that invoice would no longer reconcile with ours.
-
-    To change a rate, create a NEW card with the date the new rate starts. The
-    old one keeps pricing the period it covered. Retiring stops a card applying
-    to future freights without touching anything it has already priced.
+    Retiring stops a card applying to future freights without touching
+    anything it has already priced.
     """
     _retire(db, RateCard, item_id, "Rate card")
 
 
 class UnloadingRatePatch(BaseModel):
-    """Furniture article rates. Editable, unlike the freight rate card.
+    """Furniture article rates. Editable, unlike a rate card that has billed.
 
     These price the unloading of one article at the point. They are not snapped
     into an invoice line the way the freight card is, so correcting a typo in a
@@ -477,6 +572,10 @@ class UnloadingRatePatch(BaseModel):
     item_code: str | None = Field(default=None, max_length=48)
     base_rate: Decimal | None = Field(default=None, ge=0)
     per_floor_rate: Decimal | None = Field(default=None, ge=0)
+    # The driver's side of the same article. Missing here until now, which
+    # meant the edit form could show the figure and silently fail to save it.
+    driver_base_rate: Decimal | None = Field(default=None, ge=0)
+    driver_per_floor_rate: Decimal | None = Field(default=None, ge=0)
     charge_floors_with_lift: bool | None = None
     max_chargeable_floors: int | None = Field(default=None, ge=0, le=100)
     is_active: bool | None = None

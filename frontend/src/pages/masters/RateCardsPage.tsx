@@ -1,5 +1,5 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { IndianRupee, Plus, Sofa, Trash2, Truck } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { IndianRupee, Lock, Pencil, Plus, Sofa, Trash2, Truck } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -33,9 +33,17 @@ import { rupees, useCreate, useList } from '@/lib/resources'
  * The worked example at the bottom is the whole card in one sentence, because
  * a rate card nobody can check is a rate card nobody trusts.
  *
- * Rates are never edited — that is why there is no edit button. To change
- * one, add a card dated from the change, so freights before it keep their
- * original price and old invoices re-print unchanged.
+ * A card can be corrected until it has billed something, and not after. Those
+ * are two different acts wearing the same word. A transposed digit found
+ * before any invoice went out is a typo, and making somebody retire the card
+ * and re-key eleven fields to fix it is how a master list stops being
+ * trusted. A rate that actually changed is a new agreement, and that is still
+ * a new card dated from the day it starts — editing one that has already
+ * priced an invoice would reprice work the vendor has been billed for, and
+ * the two copies would stop reconciling.
+ *
+ * Which state a card is in is on the card, so nobody finds out from an error
+ * after filling in a form.
  */
 
 interface RateCard {
@@ -80,7 +88,7 @@ export default function RateCardsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        description="One card per agreement: what the vendor pays for a trip, the distance and the points. Rates are never edited — to change one, add a card dated from the change, so freights before it keep their original price and old invoices re-print unchanged."
+        description="One card per agreement: what the vendor pays for a trip, the distance and the points. A card can be corrected until it has billed something — after that a change is a new card dated from the day it starts, so freights before it keep their price and old invoices re-print unchanged."
         action={
           <Button
             icon={<Plus className="size-4" />}
@@ -132,6 +140,7 @@ export default function RateCardsPage() {
               card={card}
               divisionName={divisionName(card.vendor_division_id)}
               typeName={typeName(card.vehicle_type_id)}
+              types={types.data ?? []}
             />
           ))}
         </div>
@@ -175,14 +184,29 @@ function RateTile({
   card,
   divisionName,
   typeName,
+  types,
 }: {
   card: RateCard
   divisionName: string
   typeName: string
+  types: VehicleType[]
 }) {
   const queryClient = useQueryClient()
   const [confirming, setConfirming] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  /* Asked before the pencil is drawn, so a frozen card says so on its face
+     rather than refusing after somebody has typed into a form. */
+  const usage = useQuery({
+    queryKey: [`/rate-cards/${card.id}/usage`],
+    queryFn: async () =>
+      (
+        await api.get<{ editable: boolean; invoiced_freights: number; freights: number }>(
+          `/rate-cards/${card.id}/usage`,
+        )
+      ).data,
+  })
 
   const retire = useMutation({
     mutationFn: async () => (await api.delete(`/rate-cards/${card.id}`)).data,
@@ -221,15 +245,39 @@ function RateTile({
             </span>
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setConfirming(true)}
-          className="shrink-0 rounded p-1.5 hover:bg-[var(--surface-hover)]"
-          style={{ color: 'var(--text-muted)' }}
-          aria-label={`Retire the ${divisionName} rate card`}
-        >
-          <Trash2 className="size-4" />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {/* Always drawn, never hidden. A card that cannot be corrected has
+              to say why — a missing button teaches nobody the supersede
+              rule, which is exactly how this screen ended up with no edit at
+              all. */}
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="rounded p-1.5 hover:bg-[var(--surface-hover)]"
+            style={{ color: 'var(--text-muted)' }}
+            aria-label={
+              usage.data?.editable === false
+                ? `Why the ${divisionName} rate card cannot be edited`
+                : `Correct the ${divisionName} rate card`
+            }
+            title={usage.data?.editable === false ? 'Already billed — see why' : 'Correct a figure'}
+          >
+            {usage.data?.editable === false ? (
+              <Lock className="size-4" />
+            ) : (
+              <Pencil className="size-4" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="rounded p-1.5 hover:bg-[var(--surface-hover)]"
+            style={{ color: 'var(--text-muted)' }}
+            aria-label={`Retire the ${divisionName} rate card`}
+          >
+            <Trash2 className="size-4" />
+          </button>
+        </div>
       </div>
 
       <div className="px-4 py-3">
@@ -285,6 +333,16 @@ function RateTile({
         ) : null}
       </div>
 
+      <EditRateCard
+        card={card}
+        divisionName={divisionName}
+        types={types}
+        editable={usage.data?.editable !== false}
+        invoicedFreights={usage.data?.invoiced_freights ?? 0}
+        open={editing}
+        onClose={() => setEditing(false)}
+      />
+
       <Modal
         open={confirming}
         onClose={() => setConfirming(false)}
@@ -309,6 +367,261 @@ function RateTile({
         </div>
       </Modal>
     </Card>
+  )
+}
+
+/* Correcting a card, or being told why you cannot.
+ *
+ * The same dialog does both, because "there is no edit button" was the old
+ * behaviour and it taught nobody anything. A frozen card opens to the reason
+ * and the way forward — add a card dated from the change — rather than to a
+ * form that will be refused.
+ */
+function EditRateCard({
+  card,
+  divisionName,
+  types,
+  editable,
+  invoicedFreights,
+  open,
+  onClose,
+}: {
+  card: RateCard
+  divisionName: string
+  types: VehicleType[]
+  editable: boolean
+  invoicedFreights: number
+  open: boolean
+  onClose: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [form, setForm] = useState({
+    vehicle_type_id: card.vehicle_type_id ?? '',
+    effective_from: card.effective_from,
+    base_trip_amount: String(card.base_trip_amount),
+    included_km: String(card.included_km),
+    extra_km_rate: String(card.extra_km_rate),
+    included_points: String(card.included_points),
+    extra_point_rate: String(card.extra_point_rate),
+    base_point_charge: String(card.base_point_charge),
+    unloading_basis: card.unloading_basis,
+    notes: card.notes ?? '',
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  const save = useMutation({
+    mutationFn: async () =>
+      (
+        await api.patch(`/rate-cards/${card.id}`, {
+          ...form,
+          vehicle_type_id: form.vehicle_type_id || null,
+          included_km: Number(form.included_km) || 0,
+          included_points: Number(form.included_points) || 0,
+          notes: form.notes || null,
+        })
+      ).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/rate-cards'] })
+      onClose()
+    },
+    onError: (e) => setError(apiErrorMessage(e)),
+  })
+
+  if (!editable) {
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="This card has already been billed"
+        description={`It priced ${invoicedFreights} invoiced ${
+          invoicedFreights === 1 ? 'freight' : 'freights'
+        } for ${divisionName}.`}
+      >
+        <div className="space-y-4">
+          <p className="text-[13px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            Changing it now would reprice work the vendor already has a bill for, and their copy
+            of that invoice would stop matching ours. That is the one argument with an accounts
+            team nobody wins.
+          </p>
+          <p className="text-[13px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            If the rate has genuinely changed, add a new card dated from the day the new rate
+            starts. Freights before that date keep pricing on this one, and old invoices re-print
+            exactly as they were.
+          </p>
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={onClose}>
+              Understood
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    )
+  }
+
+  const base = Number(form.base_trip_amount) || 0
+  const perKm = Number(form.extra_km_rate) || 0
+  const perPoint = Number(form.extra_point_rate) || 0
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      wide
+      title={`Correct the ${divisionName} card`}
+      description="Nothing has been invoiced on this card, so a figure can still be put right. Once it has billed, a change becomes a new card instead."
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          setError(null)
+          save.mutate()
+        }}
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Vehicle type" hint="The base charge depends on it">
+            <Select
+              value={form.vehicle_type_id}
+              onChange={(e) => setForm({ ...form, vehicle_type_id: e.target.value })}
+            >
+              <option value="">Any vehicle</option>
+              {types.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="In force from">
+            <Input
+              type="date"
+              value={form.effective_from}
+              onChange={(e) => setForm({ ...form, effective_from: e.target.value })}
+              required
+            />
+          </Field>
+        </div>
+
+        <div>
+          <p className="eyebrow mb-2">The base, and what it covers</p>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Base trip charge">
+              <Input
+                className="tnum"
+                type="number"
+                step="0.01"
+                min={0}
+                value={form.base_trip_amount}
+                onChange={(e) => setForm({ ...form, base_trip_amount: e.target.value })}
+                required
+              />
+            </Field>
+            <Field label="Kilometres included">
+              <Input
+                className="tnum"
+                type="number"
+                min={0}
+                value={form.included_km}
+                onChange={(e) => setForm({ ...form, included_km: e.target.value })}
+              />
+            </Field>
+            <Field label="Points included">
+              <Input
+                className="tnum"
+                type="number"
+                min={0}
+                value={form.included_points}
+                onChange={(e) => setForm({ ...form, included_points: e.target.value })}
+              />
+            </Field>
+          </div>
+        </div>
+
+        <div>
+          <p className="eyebrow mb-2">Beyond that</p>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Each extra kilometre">
+              <Input
+                className="tnum"
+                type="number"
+                step="0.01"
+                min={0}
+                value={form.extra_km_rate}
+                onChange={(e) => setForm({ ...form, extra_km_rate: e.target.value })}
+              />
+            </Field>
+            <Field label="Each extra point">
+              <Input
+                className="tnum"
+                type="number"
+                step="0.01"
+                min={0}
+                value={form.extra_point_rate}
+                onChange={(e) => setForm({ ...form, extra_point_rate: e.target.value })}
+              />
+            </Field>
+            <Field label="Point charge" hint="Usually 0 — only where points are charged flat">
+              <Input
+                className="tnum"
+                type="number"
+                step="0.01"
+                min={0}
+                value={form.base_point_charge}
+                onChange={(e) => setForm({ ...form, base_point_charge: e.target.value })}
+              />
+            </Field>
+          </div>
+        </div>
+
+        <Field
+          label="Unloading"
+          hint="Per article means the figures live under Unloading rates, with the driver's side beside them"
+        >
+          <Select
+            value={form.unloading_basis}
+            onChange={(e) => setForm({ ...form, unloading_basis: e.target.value })}
+          >
+            <option value="NOT_APPLICABLE">Not charged — spare parts and the like</option>
+            <option value="PER_ITEM_FLOOR">Per article and floor — furniture</option>
+          </Select>
+        </Field>
+
+        {/* The same arithmetic an invoice line does, so the correction can be
+            checked against a real bill before it is saved. */}
+        {base > 0 ? (
+          <div className="inset px-3.5 py-3 text-[12.5px]">
+            <p style={{ color: 'var(--text-muted)' }}>
+              A {(Number(form.included_km) || 0) + 40} km run to{' '}
+              {(Number(form.included_points) || 0) + 2} points would bill
+            </p>
+            <p className="tnum mt-1 text-[14px]">
+              {rupees(base)} + 40 × {rupees(perKm)} + 2 × {rupees(perPoint)} ={' '}
+              <span className="font-semibold">
+                {rupees((base + 40 * perKm + 2 * perPoint).toFixed(2))}
+              </span>
+            </p>
+          </div>
+        ) : null}
+
+        <Field label="Notes">
+          <Textarea
+            value={form.notes}
+            onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            placeholder="What was agreed, and with whom"
+          />
+        </Field>
+
+        <ErrorNote>{error}</ErrorNote>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={save.isPending}>
+            Save the correction
+          </Button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 

@@ -16,6 +16,7 @@ import {
   Spinner,
 } from '@/components/ui'
 import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
+import { VehicleDetail } from '@/components/Profiles'
 import { RowActions } from '@/components/RowActions'
 import { apiErrorMessage } from '@/lib/api'
 import type { Vehicle, VehicleOwner, VehicleType } from '@/lib/resources'
@@ -24,6 +25,14 @@ import { useOpenOnNewParam } from '@/lib/motion'
 
 export default function VehiclesPage() {
   const [open, setOpen] = useState<'vehicle' | 'type' | 'owner' | null>(null)
+  const [viewing, setViewing] = useState<string | null>(null)
+
+  /* Filtering by type, because the type is what the rate card is written
+     against: a DOST and a 17-footer are different base charges for the same
+     run. "Which of our lorries can take this Godrej OCP job" is a question
+     about the type, and scanning eleven tiles for the word DOST is not how
+     anybody should answer it. */
+  const [type, setType] = useState('')
 
   // The command palette's "New …" lands here with ?new=1.
   useOpenOnNewParam(useCallback(() => setOpen('vehicle'), []))
@@ -31,10 +40,22 @@ export default function VehiclesPage() {
   const types = useList<VehicleType>('/vehicle-types')
   const owners = useList<VehicleOwner>('/vehicle-owners')
 
+  const shown = (vehicles.data ?? []).filter((v) =>
+    !type ? true : type === 'none' ? !v.vehicle_type_id : v.vehicle_type_id === type,
+  )
+
+  // Only the types that something is actually on. A chip for a type with no
+  // lorries behind it is a dead end.
+  const counts = new Map<string, number>()
+  for (const v of vehicles.data ?? []) {
+    const key = v.vehicle_type_id ?? 'none'
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
-        description="An owned vehicle pays its driver. A rented one pays the vehicle's owner, so a rented vehicle needs an owner on file first."
+        description="An owned vehicle pays its driver. A rented one pays the vehicle's owner, so a rented vehicle needs an owner on file first. The type decides which rate card prices a trip."
         action={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => setOpen('type')}>
@@ -50,6 +71,31 @@ export default function VehiclesPage() {
         }
       />
 
+      {counts.size > 1 ? (
+        <div className="flex flex-wrap gap-2">
+          <TypeChip label="All" count={vehicles.data?.length ?? 0} on={!type} onClick={() => setType('')} />
+          {types.data
+            ?.filter((t) => counts.has(t.id))
+            .map((t) => (
+              <TypeChip
+                key={t.id}
+                label={t.name}
+                count={counts.get(t.id) ?? 0}
+                on={type === t.id}
+                onClick={() => setType(type === t.id ? '' : t.id)}
+              />
+            ))}
+          {counts.has('none') ? (
+            <TypeChip
+              label="Type not set"
+              count={counts.get('none') ?? 0}
+              on={type === 'none'}
+              onClick={() => setType(type === 'none' ? '' : 'none')}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
       {vehicles.isLoading ? (
         <Card>
           <div className="flex justify-center py-16">
@@ -58,14 +104,27 @@ export default function VehiclesPage() {
         </Card>
       ) : (
         <TileGrid
-          rows={vehicles.data ?? []}
+          rows={shown}
           rowKey={(v) => v.id}
+          onRowClick={(v) => setViewing(v.id)}
           empty={
             <EmptyState
               icon={<Truck className="size-7" />}
-              title="No vehicles yet"
-              description="A freight needs a vehicle before it can be dispatched."
-              action={<Button onClick={() => setOpen('vehicle')}>New vehicle</Button>}
+              title={type ? 'None of this type' : 'No vehicles yet'}
+              description={
+                type
+                  ? 'Every lorry of this type has been retired, or there were never any.'
+                  : 'A freight needs a vehicle before it can be dispatched.'
+              }
+              action={
+                type ? (
+                  <Button variant="secondary" onClick={() => setType('')}>
+                    Show all
+                  </Button>
+                ) : (
+                  <Button onClick={() => setOpen('vehicle')}>New vehicle</Button>
+                )
+              }
             />
           }
           render={(v) => (
@@ -110,10 +169,19 @@ export default function VehiclesPage() {
                 />
                 <Fact label="Next LR" value={<span className="tnum">{v.lr_next_number}</span>} />
               </Facts>
+              <p className="mt-2.5 text-[11.5px]" style={{ color: 'var(--text-faint)' }}>
+                Open for its runs, earnings and papers
+              </p>
             </>
           )}
         />
       )}
+
+      <VehicleDetail
+        vehicleId={viewing}
+        open={viewing !== null}
+        onClose={() => setViewing(null)}
+      />
 
       <VehicleForm
         open={open === 'vehicle'}
@@ -146,6 +214,42 @@ export default function VehiclesPage() {
         ]}
       />
     </div>
+  )
+}
+
+/* A type, and how many lorries are on it.
+ *
+ * Chips rather than a dropdown: there are four or five types and the counts
+ * are half the answer — "we have three DOSTs free" is read off the filter
+ * itself, without opening anything. */
+function TypeChip({
+  label,
+  count,
+  on,
+  onClick,
+}: {
+  label: string
+  count: number
+  on: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={on}
+      className="hoverable rounded-full border px-3.5 py-1.5 text-[12.5px] font-medium"
+      style={
+        on
+          ? { background: 'var(--accent)', borderColor: 'var(--accent)', color: '#04121a' }
+          : { background: 'var(--bg-elevated)', color: 'var(--text-muted)' }
+      }
+    >
+      {label}
+      <span className="tnum ml-1.5" style={{ opacity: 0.7 }}>
+        {count}
+      </span>
+    </button>
   )
 }
 
