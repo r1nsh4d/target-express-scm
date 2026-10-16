@@ -12,8 +12,8 @@ import {
   PageHeader,
   Select,
   Spinner,
-  Table,
 } from '@/components/ui'
+import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
 import { RowActions } from '@/components/RowActions'
 import { apiErrorMessage } from '@/lib/api'
 import type { Warehouse } from '@/lib/resources'
@@ -48,46 +48,33 @@ export default function LabourPage() {
         }
       />
 
-      <Card className="overflow-hidden">
-        {labour.isLoading ? (
+      {labour.isLoading ? (
+        <Card>
           <div className="flex justify-center py-16">
             <Spinner className="size-5" />
           </div>
-        ) : (
-          <Table
-            rows={labour.data ?? []}
-            rowKey={(l) => l.id}
-            empty={
-              <EmptyState
-                icon={<HardHat className="size-7" />}
-                title="No loading crew yet"
-                description="Add the regulars, then record what they were paid against each freight."
-              />
-            }
-            columns={[
-              { key: 'name', header: 'Name', render: (l) => <span className="font-medium">{l.name}</span> },
-              { key: 'phone', header: 'Phone', render: (l) => <span className="tnum">{l.phone ?? '—'}</span> },
-              { key: 'wh', header: 'Warehouse', render: (l) => warehouseName(l.warehouse_id) },
-              {
-                key: 'trip',
-                header: 'Per freight',
-                align: 'right',
-                render: (l) => <span className="tnum">{rupees(l.per_trip_rate)}</span>,
-              },
-              {
-                key: 'day',
-                header: 'Per day',
-                align: 'right',
-                render: (l) => <span className="tnum">{rupees(l.daily_rate)}</span>,
-              },
-                          {
-                key: 'actions',
-                header: '',
-                align: 'right' as const,
-                render: (r) => (
+        </Card>
+      ) : (
+        <TileGrid
+          rows={labour.data ?? []}
+          rowKey={(l) => l.id}
+          empty={
+            <EmptyState
+              icon={<HardHat className="size-7" />}
+              title="No loading crew yet"
+              description="Add the regulars, then record what they were paid against each freight."
+              action={<Button onClick={() => setOpen(true)}>New helper</Button>}
+            />
+          }
+          render={(l) => (
+            <>
+              <TileHead
+                title={l.name}
+                sub={<span className="tnum">{l.phone ?? 'No phone'}</span>}
+                actions={
                   <RowActions
                     path={'/labour'}
-                    row={r as unknown as Record<string, unknown> & { id: string }}
+                    row={l as unknown as Record<string, unknown> & { id: string }}
                     label="Loading crew member"
                     fields={[
                       { name: 'name', label: 'Name', required: true },
@@ -96,12 +83,20 @@ export default function LabourPage() {
                       { name: 'per_trip_rate', label: 'Per trip rate', kind: 'number' as const },
                     ]}
                   />
-                ),
-              },
-]}
-          />
-        )}
-      </Card>
+                }
+              />
+              <Facts>
+                <Fact label="Warehouse" value={warehouseName(l.warehouse_id)} />
+                <Fact
+                  label="Per freight"
+                  value={<span className="tnum">{rupees(l.per_trip_rate)}</span>}
+                />
+                <Fact label="Per day" value={<span className="tnum">{rupees(l.daily_rate)}</span>} />
+              </Facts>
+            </>
+          )}
+        />
+      )}
 
       <LabourForm
         open={open}

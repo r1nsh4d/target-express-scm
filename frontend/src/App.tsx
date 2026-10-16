@@ -10,6 +10,7 @@ import AdvancesPage from '@/pages/AdvancesPage'
 import ConsignmentsPage from '@/pages/ConsignmentsPage'
 import ExpensesPage from '@/pages/ExpensesPage'
 import GuidePage from '@/pages/GuidePage'
+import { HubShell } from '@/components/HubShell'
 import DaySheetPage from '@/pages/DaySheetPage'
 import InvoicesPage from '@/pages/InvoicesPage'
 import MoneyInPage from '@/pages/MoneyInPage'
@@ -102,12 +103,12 @@ export default function App() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="guide" element={<GuidePage />} />
         <Route path="categories" element={<CategoriesPage />} />
-        <Route path="freights" element={<TripsPage />} />
+        <Route path="freights" element={<HubShell to="/freights"><TripsPage /></HubShell>} />
         <Route path="freights/:id" element={<TripDetailPage />} />
-        <Route path="vendors" element={<VendorsPage />} />
+        <Route path="vendors" element={<HubShell to="/vendors"><VendorsPage /></HubShell>} />
         <Route path="rate-cards" element={<RateCardsPage />} />
-        <Route path="vehicles" element={<VehiclesPage />} />
-        <Route path="drivers" element={<DriversPage />} />
+        <Route path="vehicles" element={<HubShell to="/vehicles"><VehiclesPage /></HubShell>} />
+        <Route path="drivers" element={<HubShell to="/drivers"><DriversPage /></HubShell>} />
         <Route path="consignees" element={<CustomersPage />} />
         <Route path="consignments" element={<ConsignmentsPage />} />
         <Route path="labels" element={<LabelsPage />} />
@@ -118,13 +119,13 @@ export default function App() {
         <Route path="reports" element={<ReportsPage />} />
         <Route path="invoices" element={<InvoicesPage />} />
         <Route path="money-in" element={<MoneyInPage />} />
-        <Route path="settlements" element={<SettlementsPage />} />
+        <Route path="settlements" element={<HubShell to="/settlements"><SettlementsPage /></HubShell>} />
         <Route path="advances" element={<AdvancesPage />} />
         <Route path="expenses" element={<ExpensesPage />} />
         <Route path="unloading-rates" element={<UnloadingRatesPage />} />
         <Route path="labour" element={<LabourPage />} />
         <Route path="roles" element={<RolesPage />} />
-        <Route path="users" element={<UsersPage />} />
+        <Route path="users" element={<HubShell to="/users"><UsersPage /></HubShell>} />
         <Route path="enquiries" element={<EnquiriesPage />} />
       </Route>
 

@@ -14,8 +14,8 @@ import {
   PageHeader,
   Select,
   Spinner,
-  Table,
 } from '@/components/ui'
+import { TileGrid, TileHead } from '@/components/TileGrid'
 import { RowActions } from '@/components/RowActions'
 import { apiErrorMessage } from '@/lib/api'
 import type { VendorDivision } from '@/lib/resources'
@@ -77,132 +77,141 @@ export default function UnloadingRatesPage() {
         </Field>
       </div>
 
-      <Card className="overflow-hidden">
-        {rates.isLoading ? (
+      {rates.isLoading ? (
+        <Card>
           <div className="flex justify-center py-16">
             <Spinner className="size-5" />
           </div>
-        ) : (
-          <Table
-            rows={rates.data ?? []}
-            rowKey={(r) => r.id}
-            empty={
-              <EmptyState
-                icon={<Sofa className="size-7" />}
-                title="No article rates"
-                description="A furniture division cannot bill unloading until its articles are priced here."
-              />
-            }
-            columns={[
-              {
-                key: 'item',
-                header: 'Article',
-                render: (r) => (
-                  <div>
-                    <div className="font-medium">{r.item_name}</div>
-                    <div className="tnum text-[11px]" style={{ color: 'var(--text-faint)' }}>
-                      {r.item_code}
-                    </div>
-                  </div>
-                ),
-              },
-              { key: 'div', header: 'Division', render: (r) => divisionName(r.vendor_division_id) },
-              {
-                key: 'base',
-                header: 'Ground floor',
-                align: 'right',
-                render: (r) => <span className="tnum">{rupees(r.base_rate)}</span>,
-              },
-              {
-                key: 'floor',
-                header: 'Per floor',
-                align: 'right',
-                render: (r) => <span className="tnum">{rupees(r.per_floor_rate)}</span>,
-              },
-              {
-                key: 'driver',
-                header: 'Driver is paid',
-                align: 'right',
-                render: (r) =>
-                  Number(r.driver_base_rate) > 0 ? (
-                    <span className="tnum">{rupees(r.driver_base_rate)}</span>
-                  ) : (
-                    <span className="text-[12px]" style={{ color: 'var(--text-faint)' }}>
-                      on a %
-                    </span>
-                  ),
-              },
-              {
-                /* The number the business actually runs on. Shown beside the
-                   two it comes from, so a rate raised on one side and not the
-                   other is visible on the same row rather than discovered in a
-                   settlement three weeks later. */
-                key: 'margin',
-                header: 'Margin',
-                align: 'right',
-                render: (r) => {
-                  if (Number(r.driver_base_rate) <= 0) return <span style={{ color: 'var(--text-faint)' }}>—</span>
-                  const margin = Number(r.base_rate) - Number(r.driver_base_rate)
-                  return (
-                    <span
-                      className="tnum font-medium"
-                      style={{ color: margin > 0 ? 'var(--success)' : 'var(--danger)' }}
-                    >
-                      {rupees(margin)}
-                    </span>
-                  )
-                },
-              },
-              {
-                key: 'lift',
-                header: 'With a lift',
-                render: (r) =>
-                  r.charge_floors_with_lift ? (
-                    <Badge tone="warning">Floors still charged</Badge>
-                  ) : (
-                    <Badge tone="neutral">Ground rate only</Badge>
-                  ),
-              },
-              {
-                key: 'cap',
-                header: 'Cap',
-                align: 'right',
-                render: (r) =>
-                  r.max_chargeable_floors > 0 ? (
-                    <span className="tnum">{r.max_chargeable_floors} floors</span>
-                  ) : (
-                    <span style={{ color: 'var(--text-faint)' }}>none</span>
-                  ),
-              },
-              {
-                key: 'from',
-                header: 'Effective',
-                render: (r) => <span className="tnum">{r.effective_from}</span>,
-              },
-                          {
-                key: 'actions',
-                header: '',
-                align: 'right' as const,
-                render: (r) => (
-                  <RowActions
-                    path={'/unloading-rates'}
-                    row={r as unknown as Record<string, unknown> & { id: string }}
-                    label="Unloading rate"
-                    fields={[
-                      { name: 'item_name', label: 'Article', required: true },
-                      { name: 'item_code', label: 'Code' },
-                      { name: 'base_rate', label: 'Base rate', kind: 'number' as const, hint: 'Ground floor, per article' },
-                      { name: 'per_floor_rate', label: 'Per floor', kind: 'number' as const },
-                      { name: 'max_chargeable_floors', label: 'Max floors charged', kind: 'number' as const, hint: '0 means no cap' },
-                      { name: 'charge_floors_with_lift', label: 'Charge floors even with a lift', kind: 'checkbox' as const },
-                    ]}
+        </Card>
+      ) : (
+        <TileGrid
+          rows={rates.data ?? []}
+          rowKey={(r) => r.id}
+          columns={2}
+          empty={
+            <EmptyState
+              icon={<Sofa className="size-7" />}
+              title="No article rates"
+              description="A furniture division cannot bill unloading until its articles are priced here."
+              action={
+                divisions.data?.length ? (
+                  <Button onClick={() => setOpen(true)}>New article rate</Button>
+                ) : undefined
+              }
+            />
+          }
+          render={(r) => {
+            const margin = Number(r.base_rate) - Number(r.driver_base_rate)
+            const onPercent = Number(r.driver_base_rate) <= 0
+
+            return (
+              <>
+                <TileHead
+                  title={r.item_name}
+                  sub={divisionName(r.vendor_division_id)}
+                  actions={
+                    <RowActions
+                      path={'/unloading-rates'}
+                      row={r as unknown as Record<string, unknown> & { id: string }}
+                      label="Unloading rate"
+                      fields={[
+                        { name: 'item_name', label: 'Article', required: true },
+                        { name: 'item_code', label: 'Code' },
+                        {
+                          name: 'base_rate',
+                          label: 'Vendor is charged, ground floor',
+                          kind: 'number' as const,
+                        },
+                        {
+                          name: 'per_floor_rate',
+                          label: 'Vendor is charged, per floor',
+                          kind: 'number' as const,
+                        },
+                        {
+                          name: 'driver_base_rate',
+                          label: 'Driver is paid, ground floor',
+                          kind: 'number' as const,
+                          hint: '0 pays him the percentage share instead',
+                        },
+                        {
+                          name: 'driver_per_floor_rate',
+                          label: 'Driver is paid, per floor',
+                          kind: 'number' as const,
+                        },
+                        {
+                          name: 'max_chargeable_floors',
+                          label: 'Max floors charged',
+                          kind: 'number' as const,
+                          hint: '0 means no cap',
+                        },
+                        {
+                          name: 'charge_floors_with_lift',
+                          label: 'Charge floors even with a lift',
+                          kind: 'checkbox' as const,
+                        },
+                      ]}
+                    />
+                  }
+                />
+
+                {/* The two sides and the difference, stacked as a little
+                    ledger. On ten columns the vendor rate and the driver rate
+                    sat far apart and the margin between them was a number
+                    nobody read; here they are three lines under each other. */}
+                <div className="mt-3 space-y-1.5 rounded-[11px] px-3 py-2.5"
+                  style={{ background: 'var(--bg-elevated)' }}
+                >
+                  <Side
+                    label="Vendor is charged"
+                    base={r.base_rate}
+                    perFloor={r.per_floor_rate}
                   />
-                ),
-              },
-]}
-          />
-        )}
-      </Card>
+                  {onPercent ? (
+                    <p className="text-[12px]" style={{ color: 'var(--text-faint)' }}>
+                      Driver is paid the percentage share on his pay terms, not a per-article rate.
+                    </p>
+                  ) : (
+                    <>
+                      <Side
+                        label="Driver is paid"
+                        base={r.driver_base_rate}
+                        perFloor={r.driver_per_floor_rate}
+                      />
+                      <div className="groove my-1" />
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-[12.5px] font-medium">Target Express keeps</span>
+                        <span
+                          className="tnum text-[13px] font-semibold"
+                          style={{ color: margin > 0 ? 'var(--success)' : 'var(--danger)' }}
+                        >
+                          {rupees(margin)}
+                        </span>
+                      </div>
+                      {margin <= 0 ? (
+                        <p className="text-[12px]" style={{ color: 'var(--danger)' }}>
+                          The driver is paid at least what the vendor is charged. Check both.
+                        </p>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  <Badge tone={r.charge_floors_with_lift ? 'warning' : 'neutral'}>
+                    {r.charge_floors_with_lift ? 'Floors charged with a lift' : 'Lift: ground rate only'}
+                  </Badge>
+                  {r.max_chargeable_floors > 0 ? (
+                    <Badge tone="neutral">Capped at {r.max_chargeable_floors} floors</Badge>
+                  ) : null}
+                  <span className="tnum text-[12px]" style={{ color: 'var(--text-faint)' }}>
+                    from {r.effective_from}
+                  </span>
+                </div>
+              </>
+            )
+          }}
+        />
+      )}
 
       <RateForm
         open={open}
@@ -210,6 +219,31 @@ export default function UnloadingRatesPage() {
         divisions={divisions.data ?? []}
         preselected={division}
       />
+    </div>
+  )
+}
+
+/** One side of the unloading money: the ground rate, and what a floor adds. */
+function Side({
+  label,
+  base,
+  perFloor,
+}: {
+  label: string
+  base: string
+  perFloor: string
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+        {label}
+      </span>
+      <span className="tnum text-[13px]">
+        {rupees(base)}
+        {Number(perFloor) > 0 ? (
+          <span style={{ color: 'var(--text-muted)' }}> + {rupees(perFloor)}/floor</span>
+        ) : null}
+      </span>
     </div>
   )
 }

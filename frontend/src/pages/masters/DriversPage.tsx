@@ -14,8 +14,8 @@ import {
   PageHeader,
   Select,
   Spinner,
-  Table,
 } from '@/components/ui'
+import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
 import { RowActions } from '@/components/RowActions'
 import { apiErrorMessage } from '@/lib/api'
 import type { Driver, Vehicle } from '@/lib/resources'
@@ -41,67 +41,72 @@ export default function DriversPage() {
         }
       />
 
-      <Card className="overflow-hidden">
-        {drivers.isLoading ? (
+      {drivers.isLoading ? (
+        <Card>
           <div className="flex justify-center py-16">
             <Spinner className="size-5" />
           </div>
-        ) : (
-          <Table
-            rows={drivers.data ?? []}
-            rowKey={(d) => d.id}
-            empty={
-              <EmptyState
-                icon={<UserRound className="size-7" />}
-                title="No drivers yet"
-                description="A driver needs a login before he can run a trip from his phone."
-                action={<Button onClick={() => setOpen(true)}>New driver</Button>}
-              />
-            }
-            columns={[
-              { key: 'name', header: 'Name', render: (d) => <span className="font-medium">{d.name}</span> },
-              { key: 'phone', header: 'Phone', render: (d) => <span className="tnum">{d.phone}</span> },
-              {
-                key: 'engagement',
-                header: 'Engagement',
-                render: (d) => (
+        </Card>
+      ) : (
+        <TileGrid
+          rows={drivers.data ?? []}
+          rowKey={(d) => d.id}
+          empty={
+            <EmptyState
+              icon={<UserRound className="size-7" />}
+              title="No drivers yet"
+              description="A driver needs a login before he can run a trip from his phone."
+              action={<Button onClick={() => setOpen(true)}>New driver</Button>}
+            />
+          }
+          render={(d) => (
+            <>
+              <TileHead
+                title={d.name}
+                // His phone is also his username, so it belongs beside his
+                // name rather than three columns away.
+                sub={<span className="tnum">{d.phone}</span>}
+                badge={
                   <Badge tone={d.engagement === 'OWN_STAFF' ? 'success' : 'info'}>
                     {d.engagement === 'OWN_STAFF' ? 'Own staff' : 'On a rented vehicle'}
                   </Badge>
-                ),
-              },
-              { key: 'licence', header: 'Licence', render: (d) => d.licence_no ?? '—' },
-              {
-                key: 'login',
-                header: 'Login',
-                render: (d) =>
-                  d.user_id ? (
-                    <Badge tone="success">Yes</Badge>
-                  ) : (
-                    <span style={{ color: 'var(--text-faint)' }}>No</span>
-                  ),
-              },
-                          {
-                key: 'actions',
-                header: '',
-                align: 'right' as const,
-                render: (r) => (
+                }
+                actions={
                   <RowActions
                     path={'/drivers'}
-                    row={r as unknown as Record<string, unknown> & { id: string }}
+                    row={d as unknown as Record<string, unknown> & { id: string }}
                     label="Driver"
                     fields={[
                       { name: 'name', label: 'Name', required: true },
-                      { name: 'phone', label: 'Phone', kind: 'tel' as const, hint: 'Also his login username' },
+                      {
+                        name: 'phone',
+                        label: 'Phone',
+                        kind: 'tel' as const,
+                        hint: 'Also his login username',
+                      },
                       { name: 'licence_no', label: 'Licence number' },
                     ]}
                   />
-                ),
-              },
-]}
-          />
-        )}
-      </Card>
+                }
+              />
+              <Facts>
+                <Fact
+                  label="Licence"
+                  value={d.licence_no ?? 'Not on file'}
+                  tone={d.licence_no ? undefined : 'muted'}
+                />
+                {/* Without a login he cannot run a trip from his phone, which
+                    is the one thing about him worth seeing from here. */}
+                <Fact
+                  label="Phone login"
+                  value={d.user_id ? 'Yes' : 'Not created'}
+                  tone={d.user_id ? 'success' : 'warning'}
+                />
+              </Facts>
+            </>
+          )}
+        />
+      )}
 
       <DriverForm open={open} onClose={() => setOpen(false)} vehicles={vehicles.data ?? []} />
     </div>

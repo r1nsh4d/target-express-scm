@@ -13,9 +13,9 @@ import {
   PageHeader,
   Select,
   Spinner,
-  Table,
   Textarea,
 } from '@/components/ui'
+import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
 import { RowActions } from '@/components/RowActions'
 import { apiErrorMessage } from '@/lib/api'
 import type { Consignee } from '@/lib/resources'
@@ -26,12 +26,6 @@ import { useOpenOnNewParam } from '@/lib/motion'
 const LocationPicker = lazy(() =>
   import('@/components/LocationPicker').then((m) => ({ default: m.LocationPicker })),
 )
-
-const GEO_TONE: Record<string, 'success' | 'warning' | 'neutral'> = {
-  VERIFIED: 'success',
-  APPROXIMATE: 'warning',
-  UNVERIFIED: 'neutral',
-}
 
 export default function CustomersPage() {
   const [open, setOpen] = useState(false)
@@ -65,84 +59,93 @@ export default function CustomersPage() {
         />
       </div>
 
-      <Card className="overflow-hidden">
-        {consignees.isLoading ? (
+      {consignees.isLoading ? (
+        <Card>
           <div className="flex justify-center py-16">
             <Spinner className="size-5" />
           </div>
-        ) : (
-          <Table
-            rows={consignees.data ?? []}
-            rowKey={(c) => c.id}
-            empty={
-              <EmptyState
-                icon={<Users className="size-7" />}
-                title={search ? 'No matches' : 'No customers yet'}
-                description={
-                  search
-                    ? 'Try a different name, city or phone number.'
-                    : 'Add the delivery points before building a trip.'
-                }
-                action={search ? undefined : <Button onClick={() => setOpen(true)}>New customer</Button>}
-              />
-            }
-            columns={[
-              { key: 'name', header: 'Name', render: (c) => <span className="font-medium">{c.name}</span> },
-              {
-                key: 'type',
-                header: 'Type',
-                render: (c) => (
+        </Card>
+      ) : (
+        <TileGrid
+          rows={consignees.data ?? []}
+          rowKey={(c) => c.id}
+          empty={
+            <EmptyState
+              icon={<Users className="size-7" />}
+              title={search ? 'No matches' : 'No customers yet'}
+              description={
+                search
+                  ? 'Try a different name, city or phone number.'
+                  : 'Add the delivery points before building a trip.'
+              }
+              action={
+                search ? undefined : <Button onClick={() => setOpen(true)}>New customer</Button>
+              }
+            />
+          }
+          render={(c) => (
+            <>
+              <TileHead
+                title={c.name}
+                sub={c.address ?? c.city ?? 'No address on file'}
+                badge={
                   <Badge tone={c.type === 'DISTRIBUTION_CENTER' ? 'info' : 'neutral'}>
                     {c.type === 'DISTRIBUTION_CENTER' ? 'Distribution centre' : 'Customer'}
                   </Badge>
-                ),
-              },
-              { key: 'city', header: 'City', render: (c) => c.city ?? '—' },
-              {
-                key: 'phone',
-                header: 'Phone',
-                render: (c) =>
-                  c.phone ? (
-                    <span className="tnum">{c.phone}</span>
-                  ) : (
-                    <span style={{ color: 'var(--warning)' }}>Missing</span>
-                  ),
-              },
-              {
-                key: 'geo',
-                header: 'Location',
-                render: (c) => (
-                  <Badge tone={GEO_TONE[c.geo_confidence] ?? 'neutral'}>
-                    {c.geo_confidence.toLowerCase()}
-                  </Badge>
-                ),
-              },
-                          {
-                key: 'actions',
-                header: '',
-                align: 'right' as const,
-                render: (r) => (
+                }
+                actions={
                   <RowActions
                     path={'/consignees'}
-                    row={r as unknown as Record<string, unknown> & { id: string }}
+                    row={c as unknown as Record<string, unknown> & { id: string }}
                     label="Customer"
                     fields={[
                       { name: 'name', label: 'Name', required: true },
-                      { name: 'phone', label: 'Phone', kind: 'tel' as const, hint: 'Their tracking link is sent here' },
+                      {
+                        name: 'phone',
+                        label: 'Phone',
+                        kind: 'tel' as const,
+                        hint: 'Their tracking link is sent here',
+                      },
                       { name: 'alternate_phone', label: 'Alternate phone', kind: 'tel' as const },
                       { name: 'city', label: 'City' },
                       { name: 'pincode', label: 'Pincode' },
                       { name: 'address', label: 'Address', kind: 'textarea' as const },
                       { name: 'landmark', label: 'Landmark', kind: 'textarea' as const },
-                      { name: 'delivery_notes', label: 'Delivery notes', kind: 'textarea' as const, hint: 'Shown to the driver at the point' },
+                      {
+                        name: 'delivery_notes',
+                        label: 'Delivery notes',
+                        kind: 'textarea' as const,
+                        hint: 'Shown to the driver at the point',
+                      },
                     ]}
                   />
-                ),
-              },
-]}
-          />
-        )}
-      </Card>
+                }
+              />
+              <Facts>
+                <Fact label="City" value={c.city ?? '—'} />
+                {/* No phone means no tracking link, which is the one gap on
+                    this screen that costs somebody a call. */}
+                <Fact
+                  label="Phone"
+                  value={<span className="tnum">{c.phone ?? 'Missing'}</span>}
+                  tone={c.phone ? undefined : 'warning'}
+                />
+                <Fact
+                  label="Pin"
+                  value={c.geo_confidence.toLowerCase()}
+                  tone={
+                    c.geo_confidence === 'VERIFIED'
+                      ? 'success'
+                      : c.geo_confidence === 'APPROXIMATE'
+                        ? 'warning'
+                        : 'muted'
+                  }
+                />
+              </Facts>
+            </>
+          )}
+        />
+      )}
 
       <CustomerForm open={open} onClose={() => setOpen(false)} />
     </div>

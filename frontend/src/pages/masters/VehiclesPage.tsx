@@ -14,8 +14,8 @@ import {
   PageHeader,
   Select,
   Spinner,
-  Table,
 } from '@/components/ui'
+import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
 import { RowActions } from '@/components/RowActions'
 import { apiErrorMessage } from '@/lib/api'
 import type { Vehicle, VehicleOwner, VehicleType } from '@/lib/resources'
@@ -50,77 +50,70 @@ export default function VehiclesPage() {
         }
       />
 
-      <Card className="overflow-hidden">
-        {vehicles.isLoading ? (
+      {vehicles.isLoading ? (
+        <Card>
           <div className="flex justify-center py-16">
             <Spinner className="size-5" />
           </div>
-        ) : (
-          <Table
-            rows={vehicles.data ?? []}
-            rowKey={(v) => v.id}
-            empty={
-              <EmptyState
-                icon={<Truck className="size-7" />}
-                title="No vehicles yet"
-                description="A freight needs a vehicle before it can be dispatched."
-                action={<Button onClick={() => setOpen('vehicle')}>New vehicle</Button>}
-              />
-            }
-            columns={[
-              {
-                key: 'reg',
-                header: 'Registration',
-                render: (v) => <span className="font-medium">{v.registration_no}</span>,
-              },
-              { key: 'type', header: 'Type', render: (v) => v.vehicle_type_name ?? '—' },
-              {
-                key: 'own',
-                header: 'Ownership',
-                render: (v) => (
+        </Card>
+      ) : (
+        <TileGrid
+          rows={vehicles.data ?? []}
+          rowKey={(v) => v.id}
+          empty={
+            <EmptyState
+              icon={<Truck className="size-7" />}
+              title="No vehicles yet"
+              description="A freight needs a vehicle before it can be dispatched."
+              action={<Button onClick={() => setOpen('vehicle')}>New vehicle</Button>}
+            />
+          }
+          render={(v) => (
+            <>
+              <TileHead
+                title={<span className="tnum">{v.registration_no}</span>}
+                sub={v.vehicle_type_name ?? 'Type not set'}
+                badge={
                   <Badge tone={v.ownership === 'OWNED' ? 'success' : 'info'}>
                     {v.ownership === 'OWNED' ? 'Owned' : 'Rented'}
                   </Badge>
-                ),
-              },
-              { key: 'owner', header: 'Paid to', render: (v) => v.owner_name ?? 'Driver' },
-              {
-                key: 'km',
-                header: 'Last closing km',
-                align: 'right',
-                render: (v) => (
-                  <span className="tnum">
-                    {v.last_closing_km?.toLocaleString('en-IN') ?? '—'}
-                  </span>
-                ),
-              },
-              {
-                key: 'lr',
-                header: 'Next LR',
-                align: 'right',
-                render: (v) => <span className="tnum">{v.lr_next_number}</span>,
-              },
-                          {
-                key: 'actions',
-                header: '',
-                align: 'right' as const,
-                render: (r) => (
+                }
+                actions={
                   <RowActions
                     path={'/vehicles'}
-                    row={r as unknown as Record<string, unknown> & { id: string }}
+                    row={v as unknown as Record<string, unknown> & { id: string }}
                     label="Vehicle"
                     fields={[
                       { name: 'registration_no', label: 'Registration', required: true },
                       { name: 'make_model', label: 'Make and model' },
-                      { name: 'lr_prefix', label: 'LR prefix', hint: 'The odometer and LR counter are not editable here' },
+                      {
+                        name: 'lr_prefix',
+                        label: 'LR prefix',
+                        hint: 'The odometer and LR counter are not editable here',
+                      },
                     ]}
                   />
-                ),
-              },
-]}
-          />
-        )}
-      </Card>
+                }
+              />
+              <Facts>
+                <Fact label="Paid to" value={v.owner_name ?? 'Driver'} />
+                <Fact
+                  label="Odometer"
+                  value={
+                    <span className="tnum">
+                      {v.last_closing_km != null
+                        ? `${v.last_closing_km.toLocaleString('en-IN')} km`
+                        : '—'}
+                    </span>
+                  }
+                  tone={v.last_closing_km == null ? 'muted' : undefined}
+                />
+                <Fact label="Next LR" value={<span className="tnum">{v.lr_next_number}</span>} />
+              </Facts>
+            </>
+          )}
+        />
+      )}
 
       <VehicleForm
         open={open === 'vehicle'}

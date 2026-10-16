@@ -4,7 +4,6 @@ import {
   LogOut,
   Menu,
   ALargeSmall,
-  ChevronRight,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -23,7 +22,8 @@ import { Button, ErrorNote, Field, Input, Logo, Modal } from '@/components/ui'
 import { api, apiErrorMessage } from '@/lib/api'
 import { ROLE_LABELS, useAuth } from '@/lib/auth'
 import type { NavItem } from '@/lib/nav'
-import { SECTIONS, currentNav, navForAccess } from '@/lib/nav'
+import { currentNav, navForAccess } from '@/lib/nav'
+import { HUBS, hubFor } from '@/lib/hubs'
 import { toggleTheme, useTheme } from '@/lib/theme'
 import { TEXT_SIZE_LABELS, setTextSize, useTextSize } from '@/lib/textsize'
 
@@ -184,38 +184,18 @@ function Rail({
   const badges: Record<string, number> = {
     '/enquiries': summary.data?.new_enquiry_count ?? 0,
   }
-  const active = currentNav(pathname)
+  /* Eight entries, not twenty-six.
+     Everything else lives inside one of them as a tile, which can say what is
+     in it — eleven vehicles, four enquiries nobody has rung — where a line in
+     a menu cannot. The rail highlights the hub whichever of its screens you
+     are on, so the place you are is never ambiguous. */
+  const openHub = hubFor(pathname)
 
-  /* Which sections are open, remembered between visits.
-     Only the day's work starts open: twenty-six items on screen at once is a
-     menu nobody reads, and most of them are things you touch when setting up
-     a vendor and never again. */
-  const [open, setOpen] = useState<Record<number, boolean>>(() => {
-    const fallback = Object.fromEntries(
-      SECTIONS.map((s) => [s.group, s.openByDefault]),
-    ) as Record<number, boolean>
-    try {
-      const stored = localStorage.getItem('tx.nav.open')
-      return stored ? { ...fallback, ...JSON.parse(stored) } : fallback
-    } catch {
-      return fallback
-    }
-  })
-
-  function toggle(group: number) {
-    setOpen((current) => {
-      const next = { ...current, [group]: !current[group] }
-      try {
-        localStorage.setItem('tx.nav.open', JSON.stringify(next))
-      } catch {
-        /* preference simply will not persist */
-      }
-      return next
-    })
-  }
-
-  // Nothing is ever hidden from somebody already looking at it.
-  const activeGroup = active ? visible.find((i) => i.to === active.to)?.group : undefined
+  // A hub carries what its own screens are waiting on, so something inside a
+  // folded part of the application is never silently out of sight.
+  const hubBadge = (hub: (typeof HUBS)[number]) =>
+    (badges[hub.to] ?? 0) +
+    hub.children.reduce((n, c) => n + (badges[c.to] ?? 0), 0)
 
   return (
     <div className="flex h-full flex-col" style={{ background: 'var(--rail)' }}>
@@ -234,64 +214,24 @@ function Rail({
           browser's own chrome taken off. overflow-y-auto is the safety net for
           anything shorter, not the normal case. */}
       <nav className={clsx('flex-1 overflow-y-auto py-2', collapsed ? 'px-2' : 'px-2.5')}>
-        {SECTIONS.map(({ group, label }) => {
-          const items = visible.filter((i) => i.group === group)
-          if (!items.length) return null
-
-          const isOpen = open[group] || group === activeGroup
-          const unread = items.reduce((n, i) => n + (badges[i.to] ?? 0), 0)
-
-          return (
-          <div key={group}>
-            {/* Collapsed, the rail is icons only and a heading has nowhere to
-                go — so the sections simply run together, separated by a rule,
-                which is what it looked like before any of this. */}
-            {collapsed ? (
-              <div className="my-1 h-px" style={{ background: 'var(--rail-border)' }} aria-hidden />
-            ) : (
-              <button
-                type="button"
-                onClick={() => toggle(group)}
-                className="mt-2 flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-semibold tracking-[0.14em] uppercase"
-                style={{ color: 'var(--rail-faint)' }}
-                aria-expanded={isOpen}
-              >
-                <ChevronRight
-                  className="size-3 transition-transform"
-                  style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }}
-                  aria-hidden
-                />
-                {label}
-                {/* A count on a folded section, so something waiting inside is
-                    not silently out of sight. */}
-                {!isOpen && unread ? (
-                  <span
-                    className="tnum ms-auto rounded-full px-1.5 text-[10px]"
-                    style={{ background: 'var(--accent)', color: '#04121a' }}
-                  >
-                    {unread}
-                  </span>
-                ) : null}
-              </button>
-            )}
-
-            {(collapsed || isOpen
-              ? items
-              : []
-            )
-              .map((item) => (
-                <RailLink
-                  key={item.to}
-                  item={item}
-                  collapsed={collapsed}
-                  active={active?.to === item.to}
-                  badge={badges[item.to] ?? 0}
-                  onNavigate={onNavigate}
-                />
-              ))}
-          </div>
-          )
-        })}
+        {HUBS.filter((hub) => visible.some((i) => i.to === hub.to || hub.children.some((c) => c.to === i.to)))
+          .map((hub) => (
+            <RailLink
+              key={hub.to}
+              item={{
+                to: hub.to,
+                label: hub.label,
+                blurb: hub.blurb,
+                icon: <hub.icon className="size-4 shrink-0" />,
+                roles: [],
+                group: 0,
+              }}
+              collapsed={collapsed}
+              active={openHub?.to === hub.to}
+              badge={hubBadge(hub)}
+              onNavigate={onNavigate}
+            />
+          ))}
       </nav>
     </div>
   )

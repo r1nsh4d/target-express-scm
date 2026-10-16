@@ -13,8 +13,8 @@ import {
   Modal,
   PageHeader,
   Spinner,
-  Table,
 } from '@/components/ui'
+import { TileGrid, TileHead } from '@/components/TileGrid'
 import { RowActions } from '@/components/RowActions'
 import { apiErrorMessage } from '@/lib/api'
 import type { GoodsCategory } from '@/lib/resources'
@@ -37,51 +37,33 @@ export default function CategoriesPage() {
         }
       />
 
-      <Card className="overflow-hidden">
-        {categories.isLoading ? (
+      {categories.isLoading ? (
+        <Card>
           <div className="flex justify-center py-16">
             <Spinner className="size-5" />
           </div>
-        ) : (
-          <Table
-            rows={categories.data ?? []}
-            rowKey={(c) => c.id}
-            empty={
-              <EmptyState
-                icon={<Package className="size-7" />}
-                title="No goods categories yet"
-                description="Add these first — a vendor division points at one, and it drives how unloading is charged."
-                action={<Button onClick={() => setOpen(true)}>New category</Button>}
-              />
-            }
-            columns={[
-              {
-                key: 'name',
-                header: 'Category',
-                render: (c) => <span className="font-medium">{c.name}</span>,
-              },
-              { key: 'code', header: 'Code', render: (c) => <span className="tnum">{c.code}</span> },
-              {
-                key: 'handling',
-                header: 'Handling',
-                render: (c) => (
-                  <span className="flex flex-wrap gap-1.5">
-                    {c.is_fragile ? <Badge tone="warning">Fragile</Badge> : null}
-                    {c.is_bulky ? <Badge tone="info">Bulky</Badge> : null}
-                    {!c.is_fragile && !c.is_bulky ? (
-                      <span style={{ color: 'var(--text-faint)' }}>Standard</span>
-                    ) : null}
-                  </span>
-                ),
-              },
-                          {
-                key: 'actions',
-                header: '',
-                align: 'right' as const,
-                render: (r) => (
+        </Card>
+      ) : (
+        <TileGrid
+          rows={categories.data ?? []}
+          rowKey={(c) => c.id}
+          empty={
+            <EmptyState
+              icon={<Package className="size-7" />}
+              title="No goods categories yet"
+              description="Add these first — a vendor division points at one, and it drives how unloading is charged."
+              action={<Button onClick={() => setOpen(true)}>New category</Button>}
+            />
+          }
+          render={(c) => (
+            <>
+              <TileHead
+                title={c.name}
+                sub={<span className="tnum">{c.code}</span>}
+                actions={
                   <RowActions
                     path={'/goods-categories'}
-                    row={r as unknown as Record<string, unknown> & { id: string }}
+                    row={c as unknown as Record<string, unknown> & { id: string }}
                     label="Category"
                     fields={[
                       { name: 'name', label: 'Name', required: true },
@@ -90,12 +72,23 @@ export default function CategoriesPage() {
                       { name: 'is_bulky', label: 'Bulky', kind: 'checkbox' as const },
                     ]}
                   />
-                ),
-              },
-]}
-          />
-        )}
-      </Card>
+                }
+              />
+              {/* Handling is the whole point of a category, so it is on the
+                  tile in words rather than a column somebody has to decode. */}
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                {c.is_fragile ? <Badge tone="warning">Fragile</Badge> : null}
+                {c.is_bulky ? <Badge tone="info">Bulky — unloading per article</Badge> : null}
+                {!c.is_fragile && !c.is_bulky ? (
+                  <span className="text-[12.5px]" style={{ color: 'var(--text-faint)' }}>
+                    Standard handling
+                  </span>
+                ) : null}
+              </div>
+            </>
+          )}
+        />
+      )}
 
       <CategoryForm open={open} onClose={() => setOpen(false)} />
     </div>

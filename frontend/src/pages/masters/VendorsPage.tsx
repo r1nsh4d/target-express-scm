@@ -14,8 +14,8 @@ import {
   PageHeader,
   Select,
   Spinner,
-  Table,
 } from '@/components/ui'
+import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
 import { RowActions } from '@/components/RowActions'
 import { apiErrorMessage } from '@/lib/api'
 import type {
@@ -59,57 +59,73 @@ export default function VendorsPage() {
         }
       />
 
-      <Card className="overflow-hidden">
-        {vendors.isLoading ? (
+      {vendors.isLoading ? (
+        <Card>
           <div className="flex justify-center py-16">
             <Spinner className="size-5" />
           </div>
-        ) : (
-          <Table
-            rows={vendors.data ?? []}
-            rowKey={(v) => v.id}
-            onRowClick={setSelected}
-            empty={
-              <EmptyState
-                icon={<Building2 className="size-7" />}
-                title="No vendors yet"
-                description="Create the vendor first, then add its divisions — that is where rates live."
-                action={<Button onClick={() => setOpen('vendor')}>New vendor</Button>}
-              />
-            }
-            columns={[
-              { key: 'name', header: 'Vendor', render: (v) => <span className="font-medium">{v.name}</span> },
-              { key: 'gstin', header: 'GSTIN', render: (v) => v.gstin ?? '—' },
-              { key: 'contact', header: 'Contact', render: (v) => v.contact_phone ?? '—' },
-              {
-                key: 'divisions',
-                header: 'Divisions',
-                align: 'right',
-                render: (v) => divisions.data?.filter((d) => d.vendor_id === v.id).length ?? 0,
-              },
-                          {
-                key: 'actions',
-                header: '',
-                align: 'right' as const,
-                render: (r) => (
-                  <RowActions
-                    path={'/vendors'}
-                    row={r as unknown as Record<string, unknown> & { id: string }}
-                    label="Vendor"
-                    fields={[
-                      { name: 'name', label: 'Vendor name', required: true },
-                      { name: 'gstin', label: 'GSTIN' },
-                      { name: 'contact_person', label: 'Contact person' },
-                      { name: 'contact_phone', label: 'Contact phone', kind: 'tel' as const },
-                      { name: 'payment_terms_days', label: 'Payment terms (days)', kind: 'number' as const },
-                    ]}
+        </Card>
+      ) : (
+        <TileGrid
+          rows={vendors.data ?? []}
+          rowKey={(v) => v.id}
+          onRowClick={(v) => setSelected(selected?.id === v.id ? null : v)}
+          selected={(v) => v.id === selected?.id}
+          empty={
+            <EmptyState
+              icon={<Building2 className="size-7" />}
+              title="No vendors yet"
+              description="Create the vendor first, then add its divisions — that is where rates live."
+              action={<Button onClick={() => setOpen('vendor')}>New vendor</Button>}
+            />
+          }
+          render={(v) => {
+            const count = divisions.data?.filter((d) => d.vendor_id === v.id).length ?? 0
+
+            return (
+              <>
+                <TileHead
+                  title={v.name}
+                  sub={v.contact_person ?? 'No contact on file'}
+                  actions={
+                    <RowActions
+                      path={'/vendors'}
+                      row={v as unknown as Record<string, unknown> & { id: string }}
+                      label="Vendor"
+                      fields={[
+                        { name: 'name', label: 'Vendor name', required: true },
+                        { name: 'gstin', label: 'GSTIN' },
+                        { name: 'contact_person', label: 'Contact person' },
+                        { name: 'contact_phone', label: 'Contact phone', kind: 'tel' as const },
+                        {
+                          name: 'payment_terms_days',
+                          label: 'Payment terms (days)',
+                          kind: 'number' as const,
+                        },
+                      ]}
+                    />
+                  }
+                />
+                <Facts>
+                  <Fact
+                    label="GSTIN"
+                    value={<span className="tnum">{v.gstin ?? 'Not on file'}</span>}
+                    // An invoice cannot be issued without it, so a blank one
+                    // is a thing to fix rather than a blank cell.
+                    tone={v.gstin ? undefined : 'warning'}
                   />
-                ),
-              },
-]}
-          />
-        )}
-      </Card>
+                  <Fact label="Phone" value={<span className="tnum">{v.contact_phone ?? '—'}</span>} />
+                  <Fact
+                    label="Divisions"
+                    value={<span className="tnum">{count}</span>}
+                    tone={count ? undefined : 'warning'}
+                  />
+                </Facts>
+              </>
+            )
+          }}
+        />
+      )}
 
       {selected ? (
         <div className="grid gap-5 lg:grid-cols-2">
@@ -125,21 +141,28 @@ export default function VendorsPage() {
                 Add
               </Button>
             </div>
-            <Table
-              rows={vendorDivisions}
-              rowKey={(d) => d.id}
-              empty={
-                <EmptyState
-                  title="No divisions"
-                  description="A freight is billed against a division, so at least one is needed."
-                />
-              }
-              columns={[
-                { key: 'name', header: 'Name', render: (d) => d.name },
-                { key: 'code', header: 'Code', render: (d) => <span className="tnum">{d.code}</span> },
-                { key: 'gst', header: 'GST', align: 'right', render: (d) => `${d.gst_rate_percent}%` },
-              ]}
-            />
+            {vendorDivisions.length ? (
+              <div className="grid gap-2 px-4 pb-4 sm:grid-cols-2">
+                {vendorDivisions.map((d) => (
+                  <div
+                    key={d.id}
+                    className="rounded-[11px] border p-3"
+                    style={{ background: 'var(--bg-elevated)' }}
+                  >
+                    <p className="truncate text-[13.5px] font-medium">{d.name}</p>
+                    <p className="tnum mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                      {d.code} · GST {d.gst_rate_percent}%
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                compact
+                title="No divisions"
+                description="A freight is billed against a division, so at least one is needed."
+              />
+            )}
           </Card>
 
           <Card className="overflow-hidden">
@@ -154,21 +177,32 @@ export default function VendorsPage() {
                 Add
               </Button>
             </div>
-            <Table
-              rows={vendorWarehouses}
-              rowKey={(w) => w.id}
-              empty={
-                <EmptyState
-                  icon={<Warehouse className="size-7" />}
-                  title="No warehouses"
-                  description="A freight needs an origin, and returning to it is what closes the odometer loop."
-                />
-              }
-              columns={[
-                { key: 'name', header: 'Name', render: (w) => w.name },
-                { key: 'code', header: 'Code', render: (w) => w.code },
-              ]}
-            />
+            {vendorWarehouses.length ? (
+              <div className="grid gap-2 px-4 pb-4 sm:grid-cols-2">
+                {vendorWarehouses.map((w) => (
+                  <div
+                    key={w.id}
+                    className="flex items-center gap-2.5 rounded-[11px] border p-3"
+                    style={{ background: 'var(--bg-elevated)' }}
+                  >
+                    <Warehouse className="size-4 shrink-0" style={{ color: 'var(--text-faint)' }} />
+                    <div className="min-w-0">
+                      <p className="truncate text-[13.5px] font-medium">{w.name}</p>
+                      <p className="tnum mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                        {w.code}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                compact
+                icon={<Warehouse className="size-7" />}
+                title="No warehouses"
+                description="A freight needs an origin, and returning to it is what closes the odometer loop."
+              />
+            )}
           </Card>
 
           {/* Rates live on the division, but they belong in the vendor's own
@@ -188,77 +222,62 @@ export default function VendorsPage() {
                 </Button>
               </Link>
             </div>
-            <Table
-              rows={vendorRateCards}
-              rowKey={(c) => c.id}
-              empty={
-                <EmptyState
-                  icon={<ReceiptIndianRupee className="size-7" />}
-                  title="No rate cards"
-                  description="A freight cannot be priced until its division has a card covering the freight's date."
-                />
-              }
-              columns={[
-                {
-                  key: 'division',
-                  header: 'Division',
-                  render: (c) => (
-                    <span className="font-medium">
-                      {vendorDivisions.find((d) => d.id === c.vendor_division_id)?.name ?? '—'}
-                    </span>
-                  ),
-                },
-                {
-                  key: 'effective',
-                  header: 'Effective',
-                  render: (c) => (
-                    <span className="tnum">
-                      {c.effective_from} → {c.effective_to ?? 'open'}
-                    </span>
-                  ),
-                },
-                {
-                  key: 'base',
-                  header: 'Base freight',
-                  align: 'right',
-                  render: (c) => rupees(c.base_trip_amount),
-                },
-                {
-                  key: 'km',
-                  header: 'Distance',
-                  align: 'right',
-                  render: (c) => (
-                    <span className="tnum">
-                      {c.included_km} km free, then {rupees(c.extra_km_rate)}/km
-                    </span>
-                  ),
-                },
-                {
-                  key: 'points',
-                  header: 'Points',
-                  align: 'right',
-                  render: (c) => (
-                    <span className="tnum">
-                      {Number(c.base_point_charge) > 0
-                        ? `${rupees(c.base_point_charge)} covers `
-                        : ''}
-                      {c.included_points}, then {rupees(c.extra_point_rate)}/pt
-                    </span>
-                  ),
-                },
-                {
-                  key: 'unloading',
-                  header: 'Unloading',
-                  render: (c) => (
-                    <Badge tone={c.unloading_basis === 'NOT_APPLICABLE' ? 'neutral' : 'info'}>
-                      {c.unloading_basis === 'NOT_APPLICABLE'
-                        ? 'not billed'
-                        : c.unloading_basis.replaceAll('_', ' ').toLowerCase()}
-                    </Badge>
-                  ),
-                },
-              ]}
-            />
+            {vendorRateCards.length ? (
+              <div className="grid gap-3 px-4 pb-4 lg:grid-cols-2">
+                {vendorRateCards.map((c) => (
+                  <div
+                    key={c.id}
+                    className="rounded-[12px] border p-3.5"
+                    style={{ background: 'var(--bg-elevated)' }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-[13.5px] font-medium">
+                          {vendorDivisions.find((d) => d.id === c.vendor_division_id)?.name ?? '—'}
+                        </p>
+                        <p className="tnum mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                          {c.effective_from} → {c.effective_to ?? 'open'}
+                        </p>
+                      </div>
+                      <Badge tone={c.unloading_basis === 'NOT_APPLICABLE' ? 'neutral' : 'info'}>
+                        {c.unloading_basis === 'NOT_APPLICABLE'
+                          ? 'unloading not billed'
+                          : c.unloading_basis.replaceAll('_', ' ').toLowerCase()}
+                      </Badge>
+                    </div>
+
+                    {/* The three numbers that price a trip, in the order the
+                        calculation uses them. */}
+                    <div className="mt-3 grid grid-cols-3 gap-3">
+                      <Fact label="Base" value={rupees(c.base_trip_amount)} />
+                      <Fact
+                        label="Distance"
+                        value={
+                          <span className="tnum">
+                            {c.included_km} km, then {rupees(c.extra_km_rate)}/km
+                          </span>
+                        }
+                      />
+                      <Fact
+                        label="Points"
+                        value={
+                          <span className="tnum">
+                            {c.included_points}, then {rupees(c.extra_point_rate)}/pt
+                          </span>
+                        }
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                compact
+                icon={<ReceiptIndianRupee className="size-7" />}
+                title="No rate cards"
+                description="A freight cannot be priced until its division has a card covering the freight's date."
+              />
+            )}
           </Card>
         </div>
       ) : vendors.data?.length ? (
