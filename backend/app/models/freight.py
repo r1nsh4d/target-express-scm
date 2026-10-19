@@ -272,6 +272,27 @@ class FreightLeg(BaseModel):
     )
     change_notes: Mapped[str | None] = mapped_column(Text)
 
+    # What was agreed for THIS run, rather than worked out from a standing rate.
+    #
+    # Per-kilometre pay is right for the ordinary case and wrong for the ones
+    # people ring about. A Kasaragod round trip is settled as "twelve hundred
+    # for the run" before the lorry leaves. Without somewhere to put that, the
+    # real figure lives on paper and the settlement screen becomes decoration.
+    #
+    # NULL means "work it out", which is not the same as zero. A fare of 0 is
+    # a run somebody has decided pays nothing for driving — a real thing on a
+    # day a driver is being squared up another way — so defaulting to it would
+    # silently stop paying everybody.
+    agreed_fare: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    # The same, for the unloading. Needed most where a division prices
+    # unloading by neither article nor percentage, which is the case that was
+    # paying drivers nothing at all for carrying goods in.
+    agreed_unloading: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    # Why. An amount nobody can explain six weeks later is one that gets
+    # queried, and "agreed with Shaji, lorry was going back empty" is the
+    # whole answer.
+    fare_note: Mapped[str | None] = mapped_column(Text)
+
     freight: Mapped[Freight] = relationship(back_populates="legs")
     vehicle: Mapped[Vehicle] = relationship()
     driver: Mapped[Driver] = relationship()

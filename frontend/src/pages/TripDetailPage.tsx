@@ -67,6 +67,7 @@ export default function TripDetailPage() {
   const [overriding, setOverriding] = useState(false)
   const [swapping, setSwapping] = useState(false)
   const [correcting, setCorrecting] = useState<string | null>(null)
+  const [pricing, setPricing] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = () => {
@@ -447,14 +448,48 @@ export default function TripDetailPage() {
                     {l.change_reason !== 'INITIAL' ? (
                       <Badge tone="warning">{l.change_reason.replace('_', ' ')}</Badge>
                     ) : null}
-                    <button
-                      type="button"
-                      onClick={() => setCorrecting(l.id)}
-                      className="mt-1 block text-[11.5px] underline underline-offset-2"
-                      style={{ color: 'var(--info)' }}
-                    >
-                      Correct a reading
-                    </button>
+
+                    {/* What was settled for this run, where anything was.
+                        Shown on the leg rather than tucked in a dialog,
+                        because an agreed figure that is not visible beside
+                        the kilometres is one somebody re-derives from the
+                        rate and then queries. */}
+                    {l.agreed_fare !== null || l.agreed_unloading !== null ? (
+                      <p className="tnum mt-1 text-[12px]" style={{ color: 'var(--accent)' }}>
+                        Agreed for this run:
+                        {l.agreed_fare !== null ? ` ${rupees(l.agreed_fare)} driving` : ''}
+                        {l.agreed_fare !== null && l.agreed_unloading !== null ? ' ·' : ''}
+                        {l.agreed_unloading !== null
+                          ? ` ${rupees(l.agreed_unloading)} unloading`
+                          : ''}
+                        {l.fare_note ? (
+                          <span className="block" style={{ color: 'var(--text-faint)' }}>
+                            {l.fare_note}
+                          </span>
+                        ) : null}
+                      </p>
+                    ) : null}
+
+                    <div className="mt-1 flex flex-wrap gap-x-3">
+                      <button
+                        type="button"
+                        onClick={() => setPricing(l.id)}
+                        className="text-[11.5px] underline underline-offset-2"
+                        style={{ color: 'var(--info)' }}
+                      >
+                        {l.agreed_fare !== null || l.agreed_unloading !== null
+                          ? 'Change what was agreed'
+                          : 'Set a fixed fare'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCorrecting(l.id)}
+                        className="text-[11.5px] underline underline-offset-2"
+                        style={{ color: 'var(--info)' }}
+                      >
+                        Correct a reading
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -528,7 +563,154 @@ export default function TripDetailPage() {
         path={path}
         onDone={refresh}
       />
+
+      <AgreedFareModal
+        leg={t.legs.find((l) => l.id === pricing) ?? null}
+        onClose={() => setPricing(null)}
+        path={path}
+        onDone={refresh}
+      />
     </div>
+  )
+}
+
+/* The figure settled for one run, rather than worked out from a rate.
+ *
+ * Per-kilometre pay is right for the ordinary case and wrong for the ones
+ * people ring about: a Kasaragod round trip agreed as "twelve hundred for the
+ * run" before the lorry leaves, or a short town job at a flat two fifty.
+ * Without somewhere to put that, the real number lives in a notebook — and
+ * once the real number is in a notebook, the settlement screen is decoration.
+ *
+ * The unloading box is here for the same reason and a sharper one. Where a
+ * division prices unloading by neither article nor percentage, a driver was
+ * being paid NOTHING for carrying goods in, with no screen anywhere to say
+ * what he should get instead.
+ *
+ * BLANK AND ZERO ARE DIFFERENT. Blank means "work it out from his rate";
+ * zero means somebody decided this run pays nothing for driving, which
+ * happens on a day a driver is squared up another way. The form keeps them
+ * apart rather than treating an empty box as a nil.
+ */
+function AgreedFareModal({
+  leg,
+  onClose,
+  path,
+  onDone,
+}: {
+  leg: FreightLeg | null
+  onClose: () => void
+  path: string
+  onDone: () => void
+}) {
+  const [fare, setFare] = useState('')
+  const [unloading, setUnloading] = useState('')
+  const [note, setNote] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [openedFor, setOpenedFor] = useState<string | null>(null)
+
+  if (leg && openedFor !== leg.id) {
+    setOpenedFor(leg.id)
+    setFare(leg.agreed_fare ?? '')
+    setUnloading(leg.agreed_unloading ?? '')
+    setNote(leg.fare_note ?? '')
+    setError(null)
+  }
+
+  const save = useAction<Record<string, unknown>>(`${path}/legs/${leg?.id}/fare`, {
+    onSuccess: () => {
+      onDone()
+      onClose()
+    },
+  })
+
+  const km = leg?.leg_distance_km ?? 0
+
+  return (
+    <Modal
+      open={!!leg}
+      onClose={onClose}
+      title="What was agreed for this run"
+      description={
+        leg
+          ? `${leg.vehicle_no} · ${leg.driver_name}${km ? ` · ${km} km` : ''}. Leave a box empty to go back to his usual rate.`
+          : undefined
+      }
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          setError(null)
+          save.mutate(
+            {
+              // An empty box is "work it out", which is null — not zero. The
+              // server takes the two as different answers, so the form has to
+              // as well.
+              fare: fare.trim() === '' ? null : fare,
+              unloading: unloading.trim() === '' ? null : unloading,
+              note: note,
+              set_fare: true,
+              set_unloading: true,
+            },
+            { onError: (err) => setError(apiErrorMessage(err)) },
+          )
+        }}
+      >
+        <Field
+          label="Fare for the run"
+          hint="Replaces the per-kilometre figure. Empty means use his usual rate."
+        >
+          <Input
+            className="tnum"
+            type="number"
+            step="0.01"
+            min={0}
+            value={fare}
+            placeholder="e.g. 1200"
+            onChange={(e) => setFare(e.target.value)}
+          />
+        </Field>
+
+        <Field
+          label="Unloading for the run"
+          hint="For vendors that price unloading by neither article nor share. He is still never paid less than he handed over at the points."
+        >
+          <Input
+            className="tnum"
+            type="number"
+            step="0.01"
+            min={0}
+            value={unloading}
+            placeholder="e.g. 300"
+            onChange={(e) => setUnloading(e.target.value)}
+          />
+        </Field>
+
+        <Field label="Why" hint="So the figure can be explained six weeks later">
+          <Textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Agreed with Anil — lorry was going back empty anyway"
+          />
+        </Field>
+
+        <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+          This rewrites what the run pays straight away, so the trip screen and his phone both
+          show it. A run already covered by a settlement cannot be changed.
+        </p>
+
+        <ErrorNote>{error}</ErrorNote>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={save.isPending}>
+            Save what was agreed
+          </Button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 

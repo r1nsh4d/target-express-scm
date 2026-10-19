@@ -133,47 +133,90 @@ export default function TrackPage() {
 
   const delivered = data.status === 'DELIVERED' || data.status === 'PART_DELIVERED'
 
+  /* The one line the customer opened the link for, said in the largest type
+     on the page. It was a 13.5px grey line under a name, which is the size of
+     an afterthought — somebody standing in a shop doorway holding a phone
+     should get the answer without reading. */
+  const headline = delivered
+    ? 'Delivered'
+    : !data.dispatched
+      ? 'Being loaded'
+      : data.eta_minutes !== null
+        ? `About ${humanMinutes(data.eta_minutes)} away`
+        : data.stops_before === 0
+          ? 'Yours is next'
+          : `${data.stops_before} ${data.stops_before === 1 ? 'stop' : 'stops'} to go`
+
+  const subline = delivered
+    ? data.receiver_name
+      ? `Received by ${data.receiver_name}`
+      : 'The goods are in'
+    : !data.dispatched
+      ? 'Still at the warehouse. This page will move once the lorry sets off.'
+      : data.stops_before === 0
+        ? 'The lorry is on its way to you now'
+        : `${data.stops_before} ${data.stops_before === 1 ? 'delivery' : 'deliveries'} before yours`
+
+  // Booked, loaded, on the way, delivered.
+  const step = delivered ? 3 : data.dispatched ? 2 : 1
+
   return (
     <Shell>
       <div className="space-y-4">
-        <Card className="p-5">
+        <Card className="tx-in p-5">
           <div className="flex items-start gap-3">
             <span
-              className="grid size-10 shrink-0 place-items-center rounded-full"
+              className="grid size-11 shrink-0 place-items-center rounded-[13px]"
               style={
                 delivered
-                  ? { background: 'color-mix(in oklab, var(--success) 16%, transparent)', color: 'var(--success)' }
-                  : { background: 'var(--rail)', color: 'var(--rail-text)' }
+                  ? {
+                      background: 'color-mix(in oklab, var(--success) 16%, transparent)',
+                      color: 'var(--success)',
+                    }
+                  : { background: 'var(--accent-dim)', color: 'var(--accent)' }
               }
             >
               {delivered ? <PackageCheck className="size-5" /> : <Truck className="size-5" />}
             </span>
             <div className="min-w-0 flex-1">
-              {data.lr_no ? (
-                <p
-                  className="text-[10px] tracking-[0.14em] uppercase"
-                  style={{ color: 'var(--text-faint)' }}
-                >
-                  LR {data.lr_no}
-                  {data.trip_no ? ` · ${data.trip_no}` : ''}
-                </p>
-              ) : null}
-              <p className="text-[17px] font-semibold">{data.consignee_name}</p>
-              <p className="mt-0.5 text-[13.5px]" style={{ color: 'var(--text-muted)' }}>
-                {delivered
-                  ? 'Delivered'
-                  : data.dispatched
-                    ? data.stops_before === 0
-                      ? 'Your delivery is next'
-                      : `${data.stops_before} ${data.stops_before === 1 ? 'stop' : 'stops'} before yours`
-                    : 'Being prepared at the warehouse'}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                {!delivered && data.dispatched ? (
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10.5px] font-medium"
+                    style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}
+                  >
+                    <span className="live-dot" />
+                    On the road
+                  </span>
+                ) : null}
+                {data.lr_no ? (
+                  <span
+                    className="tnum text-[10px] tracking-[0.14em] uppercase"
+                    style={{ color: 'var(--text-faint)' }}
+                  >
+                    LR {data.lr_no}
+                    {data.trip_no ? ` · ${data.trip_no}` : ''}
+                  </span>
+                ) : null}
+              </div>
+
+              <h1 className="mt-1.5 text-[26px] leading-[1.1] font-semibold tracking-tight">
+                {headline}
+              </h1>
+              <p className="mt-1 text-[13.5px]" style={{ color: 'var(--text-muted)' }}>
+                {subline}
               </p>
             </div>
           </div>
 
+          <Journey step={step} />
+
+          <div className="groove my-4" />
+
+          <p className="text-[13px] font-medium">{data.consignee_name}</p>
           {data.address ? (
             <p
-              className="mt-4 flex gap-2 text-[13px] leading-relaxed"
+              className="mt-1 flex gap-2 text-[12.5px] leading-relaxed"
               style={{ color: 'var(--text-muted)' }}
             >
               <MapPin className="mt-0.5 size-3.5 shrink-0" />
@@ -181,10 +224,18 @@ export default function TrackPage() {
             </p>
           ) : null}
 
-          {delivered && data.receiver_name ? (
-            <p className="mt-3 flex items-center gap-2 text-[13px]" style={{ color: 'var(--success)' }}>
-              <CheckCircle2 className="size-4" />
-              Received by {data.receiver_name}
+          {delivered && data.delivered_at ? (
+            <p
+              className="mt-3 flex items-center gap-2 text-[12.5px]"
+              style={{ color: 'var(--success)' }}
+            >
+              <CheckCircle2 className="size-4 shrink-0" />
+              Signed for on {new Date(data.delivered_at).toLocaleString('en-IN', {
+                day: '2-digit',
+                month: 'short',
+                hour: 'numeric',
+                minute: '2-digit',
+              })}
             </p>
           ) : null}
 
@@ -223,21 +274,19 @@ export default function TrackPage() {
                 />
               </Suspense>
 
-              <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-                {data.eta_minutes !== null ? (
-                  <span className="text-[15px] font-semibold">
-                    Arriving in about {humanMinutes(data.eta_minutes)}
-                  </span>
-                ) : data.distance_km !== null ? (
-                  <span className="text-[15px] font-semibold">Still some way off</span>
-                ) : null}
+              {/* The headline above already carries the time, so this line
+                  carries what it cannot: how far, and how fresh the marker
+                  is. A lorry that last reported forty minutes ago is in a
+                  dead spot, and a customer watching a dot that has not moved
+                  deserves to know that rather than conclude it is parked. */}
+              <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[12.5px]">
                 {data.distance_km !== null ? (
-                  <span className="tnum text-[13px]" style={{ color: 'var(--text-muted)' }}>
-                    {data.distance_km} km away
-                  </span>
-                ) : null}
-                <span className="text-[12px]" style={{ color: 'var(--text-faint)' }}>
-                  updated {sinceText(data.vehicle_position.recorded_at)}
+                  <span className="tnum font-medium">{data.distance_km} km away</span>
+                ) : (
+                  <span style={{ color: 'var(--text-muted)' }}>Still some way off</span>
+                )}
+                <span style={{ color: 'var(--text-faint)' }}>
+                  position updated {sinceText(data.vehicle_position.recorded_at)}
                 </span>
               </div>
 
@@ -295,13 +344,29 @@ export default function TrackPage() {
         </Card>
 
         <Card className="overflow-hidden">
-          <div className="px-5 py-4">
-            <h2 className="text-[14px] font-semibold">
-              Your {data.box_count} {data.box_count === 1 ? 'box' : 'boxes'}
-            </h2>
-            <p className="mt-0.5 text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
-              Listed against the bill numbers on the cartons.
-            </p>
+          <div className="flex items-start justify-between gap-3 px-5 py-4">
+            <div>
+              <h2 className="text-[14px] font-semibold">
+                Your {data.box_count} {data.box_count === 1 ? 'box' : 'boxes'}
+              </h2>
+              <p className="mt-0.5 text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+                Listed against the bill numbers on the cartons.
+              </p>
+            </div>
+            {/* How many are actually in. On a part delivery this is the whole
+                question, and it was readable only by counting the colour of
+                four identical icons. */}
+            {data.boxes.some((b) => b.delivered) ? (
+              <span
+                className="tnum shrink-0 rounded-full px-2.5 py-1 text-[11.5px] font-medium"
+                style={{
+                  background: 'color-mix(in oklab, var(--success) 14%, transparent)',
+                  color: 'var(--success)',
+                }}
+              >
+                {data.boxes.filter((b) => b.delivered).length} of {data.boxes.length} in
+              </span>
+            ) : null}
           </div>
           {data.boxes.length ? (
             <ul>
@@ -311,13 +376,20 @@ export default function TrackPage() {
                   className="flex items-center gap-3 px-5 py-2.5"
                   style={{ borderTop: '1px solid var(--border)' }}
                 >
-                  <Package
-                    className="size-4 shrink-0"
-                    style={{ color: b.delivered ? 'var(--success)' : 'var(--text-faint)' }}
-                  />
-                  <span className="tnum flex-1 text-[13px]">
-                    Bill {b.bill_no} · box {b.item_no} of {b.of_total}
-                    {b.item_name ? ` · ${b.item_name}` : ''}
+                  {b.delivered ? (
+                    <CheckCircle2 className="size-4 shrink-0" style={{ color: 'var(--success)' }} />
+                  ) : (
+                    <Package className="size-4 shrink-0" style={{ color: 'var(--text-faint)' }} />
+                  )}
+                  <span className="min-w-0 flex-1 text-[13px]">
+                    <span className="tnum">
+                      Bill {b.bill_no} · box {b.item_no} of {b.of_total}
+                    </span>
+                    {b.item_name ? (
+                      <span className="block text-[11.5px]" style={{ color: 'var(--text-muted)' }}>
+                        {b.item_name}
+                      </span>
+                    ) : null}
                   </span>
                 </li>
               ))}
@@ -485,35 +557,104 @@ export default function TrackPage() {
   )
 }
 
+/* The same field the tracking form stands on.
+ *
+ * The form was given a hero, a glow and a grid, and the page it leads to — the
+ * one the customer actually came for and the only page of ours most of them
+ * will ever see — was a grey bar and a stack of flat boxes. Somebody who
+ * follows a link from an SMS should not feel they have left the company
+ * halfway through.
+ */
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-dvh">
-      <header className="px-5 py-4" style={{ background: 'var(--rail)' }}>
+    <div
+      className="relative flex min-h-dvh flex-col overflow-hidden"
+      style={{ background: 'var(--bg)' }}
+    >
+      <div className="aurora" aria-hidden />
+      <div className="grid-field" aria-hidden />
+
+      <header className="relative z-10 px-5 py-5">
         <div className="mx-auto flex max-w-lg items-center gap-2.5">
           <span
             aria-hidden
-            className="grid size-8 place-items-center rounded-[8px] text-[13px] font-bold italic"
-            style={{ background: 'var(--rail-text)', color: 'var(--rail)' }}
+            className="grid size-9 place-items-center rounded-[10px] text-[13px] font-bold italic"
+            style={{ background: 'var(--accent-grad)', color: '#04121a' }}
           >
             TE
           </span>
           <div className="leading-none">
-            <p
-              className="text-[12.5px] font-semibold italic tracking-[0.08em] uppercase"
-              style={{ color: 'var(--rail-text)' }}
-            >
+            <p className="text-[12.5px] font-semibold italic tracking-[0.08em] uppercase">
               {BRAND.name}
             </p>
             <p
               className="mt-[3px] text-[9px] tracking-[0.2em] uppercase"
-              style={{ color: 'var(--rail-faint)' }}
+              style={{ color: 'var(--text-faint)' }}
             >
               {BRAND.tagline}
             </p>
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-lg px-4 py-5">{children}</main>
+
+      <main className="relative z-10 mx-auto w-full max-w-lg flex-1 px-4 pt-1 pb-10">
+        {children}
+      </main>
+    </div>
+  )
+}
+
+/* Where the delivery has got to, as four steps.
+ *
+ * A customer opening this link is answering one question, and a line of grey
+ * 13px text saying "2 stops before yours" is not an answer they can see from
+ * arm's length. The rail says where the goods are in their journey before any
+ * reading happens, and the headline above it says the rest.
+ */
+function Journey({ step }: { step: number }) {
+  const steps = ['Booked', 'Loaded', 'On the way', 'Delivered']
+
+  return (
+    <div className="mt-5 flex items-start">
+      {steps.map((label, i) => {
+        const done = i <= step
+        return (
+          <div key={label} className="flex min-w-0 flex-1 flex-col items-center">
+            <div className="flex w-full items-center">
+              {/* The joining line, half each side, so the dots sit on one rail
+                  rather than each in its own cell. */}
+              <span
+                className="h-[2px] flex-1"
+                style={{ background: i === 0 ? 'transparent' : done ? 'var(--accent)' : 'var(--border)' }}
+              />
+              <span
+                className="grid size-3 shrink-0 place-items-center rounded-full"
+                style={{
+                  background: done ? 'var(--accent)' : 'var(--border-strong)',
+                  boxShadow: i === step ? '0 0 0 4px var(--accent-dim)' : undefined,
+                }}
+              />
+              <span
+                className="h-[2px] flex-1"
+                style={{
+                  background:
+                    i === steps.length - 1
+                      ? 'transparent'
+                      : i < step
+                        ? 'var(--accent)'
+                        : 'var(--border)',
+                }}
+              />
+            </div>
+            <span
+              className="mt-2 text-center text-[10.5px] leading-tight"
+              style={{ color: done ? 'var(--text)' : 'var(--text-faint)' }}
+            >
+              {label}
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 }

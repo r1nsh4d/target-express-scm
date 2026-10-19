@@ -226,6 +226,12 @@ export interface FreightLeg {
   end_odometer: number | null
   leg_distance_km: number | null
   change_reason: string
+  /* What was settled for this run, rather than worked out from a standing
+     rate. Null means "use his usual rate"; a figure, including zero, means
+     somebody looked at the job and said what it was worth. */
+  agreed_fare: string | null
+  agreed_unloading: string | null
+  fare_note: string | null
 }
 
 export interface Freight {

@@ -29,7 +29,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from app.models.enums import ChargeHead, HireRateBasis, PayeeType, UnloadingShareBasis, VehicleOwnership
+from app.models.enums import (
+    ChargeHead,
+    HireRateBasis,
+    PayeeType,
+    UnloadingShareBasis,
+    VehicleOwnership,
+)
 from app.services.rating import money
 
 
@@ -102,6 +108,21 @@ class LegFacts:
     # driver silently changes pay scheme on a quiet day.
     unloading_piece_pay: Decimal | None = None
 
+    # What was agreed for THIS run, overriding the standing rate.
+    #
+    # Per-kilometre pay is right for the ordinary case and wrong for the ones
+    # people ring about: a Kasaragod round trip settled as "twelve hundred for
+    # the run" before the lorry leaves. An agreed figure replaces the
+    # calculation outright rather than adding to it, because that is what the
+    # word means — somebody looked at the job and said what it was worth.
+    #
+    # None means "work it out". Zero is a different statement: a run that pays
+    # nothing for driving, which happens when a driver is being squared up
+    # another way, and treating the two the same would silently stop paying
+    # everybody.
+    agreed_fare: Decimal | None = None
+    agreed_unloading: Decimal | None = None
+
 
 @dataclass
 class PayoutLine:
@@ -172,22 +193,31 @@ def compute_driver_payout(rates: DriverPayRates, facts: LegFacts) -> LegPayout:
     """Owned vehicle: the driver is paid."""
     lines: list[PayoutLine] = []
 
-    transportation = money(
-        rates.per_trip_amount
-        + Decimal(facts.km) * rates.per_km_amount
-        + Decimal(facts.days) * rates.daily_allowance
-    )
+    if facts.agreed_fare is not None:
+        transportation = money(facts.agreed_fare)
+        fare_basis = f"agreed fare for this run - {facts.km} km, not charged by distance"
+    else:
+        transportation = money(
+            rates.per_trip_amount
+            + Decimal(facts.km) * rates.per_km_amount
+            + Decimal(facts.days) * rates.daily_allowance
+        )
+        fare_basis = (
+            f"trip {rates.per_trip_amount} + {facts.km} km x {rates.per_km_amount}"
+            f" + {facts.days} day allowance x {rates.daily_allowance}"
+        )
+
     if transportation:
         lines.append(
             PayoutLine(
                 head=ChargeHead.TRANSPORTATION,
                 amount=transportation,
                 quantity=Decimal(facts.km),
-                rate=rates.per_km_amount,
-                basis=(
-                    f"trip {rates.per_trip_amount} + {facts.km} km x {rates.per_km_amount}"
-                    f" + {facts.days} day allowance x {rates.daily_allowance}"
-                ),
+                # No rate on an agreed fare, because there is not one. Putting
+                # the per-km figure here would make a settlement document claim
+                # arithmetic nobody did.
+                rate=None if facts.agreed_fare is not None else rates.per_km_amount,
+                basis=fare_basis,
             )
         )
 
@@ -216,7 +246,30 @@ def compute_driver_payout(rates: DriverPayRates, facts: LegFacts) -> LegPayout:
     # own explanation rather than left for someone to infer.
     out_of_pocket = money(facts.unloading_paid)
 
-    if facts.unloading_piece_pay is not None:
+    if facts.agreed_unloading is not None:
+        # An agreed figure for the run. Still floored at what he handed over,
+        # because an agreement about what the work is worth is not an
+        # agreement that he funds the labourers out of his own pocket.
+        agreed = money(facts.agreed_unloading)
+        unloading = max(agreed, out_of_pocket)
+        if unloading:
+            lines.append(
+                PayoutLine(
+                    head=ChargeHead.LOADING_UNLOADING,
+                    amount=unloading,
+                    quantity=facts.unloading_billed,
+                    rate=None,
+                    basis=(
+                        f"{agreed} agreed for this run"
+                        if unloading == agreed
+                        else (
+                            f"{agreed} agreed for this run, raised to {out_of_pocket} "
+                            "actually paid out - a driver is never left out of pocket"
+                        )
+                    ),
+                )
+            )
+    elif facts.unloading_piece_pay is not None:
         # Priced per article: the driver is paid for what he actually carried,
         # off his own column of the same rate row the vendor is charged from.
         # No percentage is involved, so there is nothing to floor — but he is
@@ -334,19 +387,30 @@ def compute_owner_payout(rates: HireRates, facts: LegFacts) -> LegPayout:
     """Rented vehicle: the vehicle's owner is paid."""
     lines: list[PayoutLine] = []
 
-    if rates.rate_basis == HireRateBasis.PER_KM:
+    if facts.agreed_fare is not None:
+        # A lorry hired for one run at a figure settled on the phone. More
+        # common on a market vehicle than a standing arrangement is, and until
+        # now the only place to record it was a notebook.
+        amount = money(facts.agreed_fare)
+        basis = f"agreed hire for this run - {facts.km} km, not charged by distance"
+        quantity: Decimal | None = Decimal(facts.km)
+        agreed = True
+    elif rates.rate_basis == HireRateBasis.PER_KM:
+        agreed = False
         # A minimum guarantee means a short trip still bills at the floor.
         chargeable_km = max(facts.km, rates.minimum_km_per_trip)
         amount = money(Decimal(chargeable_km) * rates.rate_value)
         basis = f"{chargeable_km} km x {rates.rate_value}"
         if chargeable_km > facts.km:
             basis += f" (minimum {rates.minimum_km_per_trip} km applied, ran {facts.km})"
-        quantity: Decimal | None = Decimal(chargeable_km)
+        quantity = Decimal(chargeable_km)
     elif rates.rate_basis == HireRateBasis.PER_DAY:
+        agreed = False
         amount = money(Decimal(facts.days) * rates.rate_value)
         basis = f"{facts.days} day(s) x {rates.rate_value}"
         quantity = Decimal(facts.days)
     else:  # PER_TRIP
+        agreed = False
         amount = money(rates.rate_value)
         basis = f"flat trip rate {rates.rate_value}"
         quantity = Decimal("1")
@@ -358,7 +422,8 @@ def compute_owner_payout(rates: HireRates, facts: LegFacts) -> LegPayout:
                 amount=amount,
                 payee_type=PayeeType.VEHICLE_OWNER,
                 quantity=quantity,
-                rate=rates.rate_value,
+                # No rate on an agreed figure, because there is not one.
+                rate=None if agreed else rates.rate_value,
                 basis=basis,
             )
         )
@@ -381,7 +446,13 @@ def compute_owner_payout(rates: HireRates, facts: LegFacts) -> LegPayout:
     # paid the labourers and splits it with the cleaner. The hire itself still
     # settles to the owner.
     if not rates.includes_unloading:
-        unloading = money(facts.unloading_paid)
+        # An agreed figure for this run wins, floored at what was handed over
+        # — nobody funds the labourers out of their own pocket.
+        unloading = (
+            max(money(facts.agreed_unloading), money(facts.unloading_paid))
+            if facts.agreed_unloading is not None
+            else money(facts.unloading_paid)
+        )
         if unloading:
             to_owner = rates.unloading_paid_to_owner
             lines.append(

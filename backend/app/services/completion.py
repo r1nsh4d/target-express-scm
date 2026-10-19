@@ -155,6 +155,15 @@ def leg_facts(db: Session, leg: FreightLeg) -> LegFacts:
         # Reimbursed in full to whoever handed it over, never shared.
         coolie_paid=sum((Decimal(p.coolie_paid or 0) for p in covered), Decimal("0")),
         days=days,
+        # What was settled for this run, if anything was. None means "work it
+        # out from the standing rate"; a figure, including zero, means
+        # somebody looked at the job and said what it was worth.
+        agreed_fare=(
+            Decimal(leg.agreed_fare) if leg.agreed_fare is not None else None
+        ),
+        agreed_unloading=(
+            Decimal(leg.agreed_unloading) if leg.agreed_unloading is not None else None
+        ),
     )
 
 

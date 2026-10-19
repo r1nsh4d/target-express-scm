@@ -33,11 +33,13 @@ from app.models.enums import (
 )
 from app.models.fleet import Driver, Vehicle
 from app.models.freight import Freight, FreightLeg, FreightPoint
+from app.models.settlement import FreightPayout
 from app.models.tracking import TrackingSession
 from app.models.user import User
 from app.models.vendor import VendorDivision, VendorWarehouse
-from app.services.invoicing import billable_coolie, billable_unloading
+from app.services.completion import record_leg_payouts
 from app.services.controls import next_lr_number
+from app.services.invoicing import billable_coolie, billable_unloading
 from app.services.rating import (
     RateCardNotFound,
     RateTerms,
@@ -137,6 +139,11 @@ class LegOut(BaseModel):
     end_odometer: int | None
     leg_distance_km: int | None
     change_reason: LegChangeReason
+    # Null means the standing rate applies. A figure, including zero, is what
+    # somebody agreed for this run.
+    agreed_fare: Decimal | None = None
+    agreed_unloading: Decimal | None = None
+    fare_note: str | None = None
 
 
 class FreightOut(BaseModel):
@@ -306,6 +313,9 @@ def _freight_out(db: Session, freight: Freight) -> FreightOut:
                 end_odometer=leg.end_odometer,
                 leg_distance_km=leg.leg_distance_km,
                 change_reason=leg.change_reason,
+                agreed_fare=leg.agreed_fare,
+                agreed_unloading=leg.agreed_unloading,
+                fare_note=leg.fare_note,
             )
             for leg in freight.legs
         ],
@@ -765,6 +775,83 @@ def correct_odometer(
     freight.total_km = freight.round_trip_km
     if payload.field == "end_odometer":
         leg.vehicle.last_closing_km = payload.corrected_value
+
+    db.commit()
+    db.refresh(freight)
+    return _freight_out(db, freight)
+
+
+class AgreedFareIn(BaseModel):
+    """What was settled for this run, rather than worked out from a rate.
+
+    Both fields are explicit three-way: a number sets it, null clears it back
+    to the standing rate, and leaving the field out entirely changes nothing.
+    That matters because zero is a real answer — a run that pays nothing for
+    driving happens when a driver is being squared up another way — and a
+    two-way flag would make it indistinguishable from "work it out".
+    """
+
+    fare: Decimal | None = Field(default=None, ge=0)
+    unloading: Decimal | None = Field(default=None, ge=0)
+    note: str | None = Field(default=None, max_length=300)
+    # Which of the two to actually touch, since null is a meaningful value.
+    set_fare: bool = True
+    set_unloading: bool = True
+
+
+@router.post("/{freight_id}/legs/{leg_id}/fare", response_model=FreightOut)
+def set_agreed_fare(
+    freight_id: str,
+    leg_id: str,
+    payload: AgreedFareIn,
+    db: Session = Depends(get_db),
+    _=OpsDep,
+):
+    """Type the figure agreed for this run.
+
+    Per-kilometre pay is right for the ordinary case and wrong for the ones
+    people ring about: a Kasaragod round trip settled as "twelve hundred for
+    the run" before the lorry leaves. Without somewhere to put that, the real
+    number lives in a notebook and the settlement screen is decoration.
+
+    A settled leg is refused. Its payouts are already inside a settlement
+    somebody has been paid against, and moving the figure underneath that
+    would leave the settlement document disagreeing with its own lines.
+    Otherwise the leg's payouts are rewritten at once, so the trip screen and
+    the driver's phone show the agreed figure rather than the old arithmetic
+    until something happens to recompute them.
+    """
+    freight = _load(db, freight_id)
+    leg = db.get(FreightLeg, leg_id)
+    if leg is None or str(leg.freight_id) != str(freight.id):
+        raise HTTPException(status_code=404, detail="Leg not found on this freight")
+
+    settled = db.scalar(
+        select(FreightPayout.id).where(
+            FreightPayout.leg_id == leg.id, FreightPayout.settlement_id.isnot(None)
+        )
+    )
+    if settled is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This run has already been settled. Changing the fare now would leave "
+                "the settlement disagreeing with its own lines — raise an adjustment "
+                "on the next settlement instead."
+            ),
+        )
+
+    if payload.set_fare:
+        leg.agreed_fare = payload.fare
+    if payload.set_unloading:
+        leg.agreed_unloading = payload.unloading
+    if payload.note is not None:
+        leg.fare_note = payload.note.strip() or None
+
+    # Rewritten now rather than at the next close, so what the screen says and
+    # what the settlement will pay cannot drift apart in between.
+    if leg.end_odometer is not None:
+        record_leg_payouts(db, leg)
 
     db.commit()
     db.refresh(freight)
