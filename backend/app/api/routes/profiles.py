@@ -38,6 +38,7 @@ from app.models.enums import AdvanceStatus, PayeeType
 from app.models.fleet import Driver, Vehicle, VehicleHireTerms, VehicleOwner, VehicleType
 from app.models.freight import Freight, FreightLeg
 from app.models.settlement import Advance, FreightPayout, Settlement
+from app.services.economics import freight_economics
 from app.services.rating import money
 
 router = APIRouter(prefix="/api", tags=["profiles"])
@@ -179,6 +180,75 @@ def _invoiced_by_freight(db: Session, freight_ids: list) -> dict:
         )
     ).all()
     return {row[0]: Decimal(row[1]) for row in rows}
+
+
+class MoneyLineOut(BaseModel):
+    label: str
+    amount: Decimal
+    working: str
+
+
+class UnloadingPointOut(BaseModel):
+    point_id: str
+    sequence: int
+    customer_name: str
+    floor_number: int
+    has_lift: bool
+    articles: list[dict]
+    charged: Decimal
+    driver_pay: Decimal
+    margin: Decimal
+
+
+class EconomicsOut(BaseModel):
+    trip_no: str
+    trip_date: str
+    status: str
+    vehicle_no: str | None
+    vehicle_type_name: str | None
+    driver_name: str | None
+    km: int
+    points: int
+    revenue: list[MoneyLineOut]
+    revenue_total: Decimal
+    revenue_problem: str | None
+    cost: list[MoneyLineOut]
+    cost_total: Decimal
+    paid_to: str
+    is_settled: bool
+    unloading_points: list[UnloadingPointOut]
+    margin: Decimal
+    margin_percent: Decimal
+    margin_per_km: Decimal
+
+
+@router.get("/freights/{freight_id}/economics", response_model=EconomicsOut)
+def freight_money(freight_id: str, db: Session = Depends(get_db), _=ReadDep):
+    """In, out, and what is left — for one trip.
+
+    The office's view of the question the driver asks about his own pay. Both
+    come off `services.economics`, so his total and the cost line here are the
+    same number rather than two screens' opinions of it.
+    """
+    freight = db.get(Freight, freight_id)
+    if freight is None:
+        raise HTTPException(status_code=404, detail="Freight not found")
+
+    e = freight_economics(db, freight)
+    return EconomicsOut(
+        **{
+            **e.__dict__,
+            "revenue": [MoneyLineOut(**line.__dict__) for line in e.revenue],
+            "cost": [MoneyLineOut(**line.__dict__) for line in e.cost],
+            "unloading_points": [
+                UnloadingPointOut(**{**p.__dict__, "margin": p.margin})
+                for p in e.unloading_points
+            ],
+            "margin": e.margin,
+            "margin_percent": e.margin_percent,
+            "margin_per_km": e.margin_per_km,
+        }
+    )
 
 
 @router.get("/vehicles/{vehicle_id}/profile", response_model=VehicleProfileOut)

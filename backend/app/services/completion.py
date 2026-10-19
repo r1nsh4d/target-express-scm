@@ -38,7 +38,7 @@ from app.services.settlement import recover_advances_for_freight
 from app.services.unloading import (
     calculate_point_driver_pay,
     division_pays_per_article,
-    items_from_boxes,
+    items_at_point,
     resolve_item_rates,
 )
 
@@ -132,7 +132,11 @@ def leg_facts(db: Session, leg: FreightLeg) -> LegFacts:
         for point in covered:
             pay = calculate_point_driver_pay(
                 rates,
-                items_from_boxes([b for c in point.consignments for b in c.boxes]),
+                # What he counted through the door, not what the bill said was
+                # sent. The vendor is charged off the same count, so the
+                # margin on a point is a subtraction — which it stops being
+                # the moment these two read from different places.
+                items_at_point(point),
                 floor_number=point.floor_number,
                 has_lift=point.has_lift,
             )

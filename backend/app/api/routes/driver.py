@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
+from app.models.consignment import Box, Consignment
 from app.models.enums import (
     AdvanceStatus,
     BoxStatus,
@@ -19,21 +20,23 @@ from app.models.enums import (
     PayeeType,
     UserRole,
 )
-from app.models.consignment import Box, Consignment
 from app.models.expense import TripExpense
 from app.models.fleet import Driver
-from app.models.tracking import VehiclePing
 from app.models.freight import Freight, FreightLeg, FreightPoint, PointUnloadingItem
 from app.models.settlement import Advance, FreightPayout
+from app.models.tracking import VehiclePing
 from app.models.user import User
+from app.services.completion import complete_freight_if_returned, record_leg_payouts
 from app.services.controls import reconcile_boxes
-from app.services.rating import money
+from app.services.economics import driver_earnings_for_leg
+from app.services.rating import RateCardNotFound, money, resolve_rate_card
 from app.services.unloading import (
     UnloadItem,
+    calculate_point_driver_pay,
     calculate_point_unloading,
+    division_pays_per_article,
     resolve_item_rates,
 )
-from app.services.completion import complete_freight_if_returned, record_leg_payouts
 
 router = APIRouter(prefix="/api/driver", tags=["driver"])
 
@@ -755,7 +758,10 @@ def _boxes_for_point(db: Session, point: FreightPoint) -> list[Box]:
         .scalars()
         .all()
     )
-    return sorted(rows, key=lambda b: (b.consignment.vendor_bill_no if b.consignment else "", b.item_no))
+    return sorted(
+        rows,
+        key=lambda b: (b.consignment.vendor_bill_no if b.consignment else "", b.item_no),
+    )
 
 
 def _my_point(db: Session, point: FreightPoint, user: User) -> None:
@@ -790,10 +796,18 @@ class UnloadingSheetOut(BaseModel):
     driver_total: Decimal
     coolie_paid: Decimal
     coolie_note: str | None
-    # False when this division does not price unloading per article at all —
-    # spare parts are carried in and nothing is charged — so the phone shows a
-    # plain cash box instead of a list nobody can fill in.
+    # False when no article rates are on file for this division, so there is
+    # no list to fill in.
     priced_per_article: bool
+    # Whether the vendor's rate card says unloading IS charged per article.
+    #
+    # These two were one flag, and the two states it ran together are not the
+    # same thing at all. Spare parts are carried in and nothing is charged:
+    # correct to show no list. Furniture where nobody has entered the article
+    # rates yet looks identical from the rates table — and the screen simply
+    # vanished, so the driver could log nothing, the vendor was charged
+    # nothing, and no part of the system said why.
+    charges_unloading: bool
     # Whether the driver's own side is shown. A driver on a rented vehicle is
     # paid by the vehicle's owner, not by Target Express, so a figure here
     # would be money he is never going to see. Decided on the server and the
@@ -847,7 +861,29 @@ def _unloading_sheet(
         coolie_paid=Decimal(point.coolie_paid or 0),
         coolie_note=point.coolie_note,
         priced_per_article=bool(rates),
+        charges_unloading=_division_charges_unloading(db, freight),
     )
+
+
+def _division_charges_unloading(db: Session, freight) -> bool:
+    """Does this vendor's card say unloading is charged per article?
+
+    Asked of the card rather than inferred from the rates table, because
+    "nothing is charged here" and "nobody has entered the rates yet" are
+    different problems and only one of them is somebody's job to fix.
+    """
+    vehicle_type_id = None
+    if freight.legs and freight.legs[0].vehicle is not None:
+        vehicle_type_id = freight.legs[0].vehicle.vehicle_type_id
+    try:
+        card = resolve_rate_card(
+            db, freight.vendor_division_id, freight.trip_date, vehicle_type_id
+        )
+    except RateCardNotFound:
+        # No card at all is a different failure, surfaced where the trip is
+        # priced. It is not this screen's business to claim unloading is free.
+        return False
+    return str(card.unloading_basis) != "NOT_APPLICABLE"
 
 
 @router.get("/points/{point_id}/unloading", response_model=UnloadingSheetOut)
@@ -947,6 +983,15 @@ def log_unloading(
     db.flush()
 
     unknown: list[str] = []
+    # Kept as we go, rather than read back off the point afterwards.
+    #
+    # `point.unloading_items` was loaded by the delete loop above and does not
+    # pick up rows added after it — so the list came back EMPTY and the charge
+    # computed as zero. The quantities saved, which is why this looked like it
+    # worked: the driver's counts came back when he reopened the screen, and
+    # the money against them was nil. On screen it read "the unloading is not
+    # saving", and it was the only part that was not.
+    items: list[UnloadItem] = []
     for article in payload.articles:
         if article.quantity <= 0:
             continue
@@ -962,6 +1007,7 @@ def log_unloading(
                 quantity=article.quantity,
             )
         )
+        items.append(UnloadItem(item_code=rate.item_code, quantity=article.quantity))
 
     if unknown:
         db.rollback()
@@ -971,15 +1017,27 @@ def log_unloading(
         )
 
     db.flush()
-
-    items = [
-        UnloadItem(item_code=row.item_code, quantity=row.quantity)
-        for row in point.unloading_items
-    ]
     charged = calculate_point_unloading(
         rates, items, floor_number=point.floor_number, has_lift=point.has_lift
     )
     point.unloading_billed = charged.total
+
+    # What goes OUT at this door, as well as what the vendor is charged.
+    #
+    # This wrote only `unloading_billed`, so the cash the driver actually
+    # hands the labourers stayed at zero on every point. Two things broke
+    # quietly off that: the trip screen read "Unloading 140.00 (paid 0.00)"
+    # on every furniture stop, and a driver on the older percentage-of-what-
+    # was-paid arrangement earned a percentage of nothing.
+    #
+    # Only where the division prices the driver's side per article. Where it
+    # does not, the percentage arrangement decides what leaves the pocket and
+    # writing a figure here would be inventing one.
+    if division_pays_per_article(rates):
+        paid = calculate_point_driver_pay(
+            rates, items, floor_number=point.floor_number, has_lift=point.has_lift
+        )
+        point.unloading_paid = paid.total
 
     if payload.coolie_paid is not None:
         point.coolie_paid = payload.coolie_paid
@@ -1010,8 +1068,20 @@ def deliver_point(
     point.delivered_box_count = payload.delivered_box_count
     point.receiver_name = payload.receiver_name
     point.delivery_photo_url = payload.delivery_photo_url
-    point.unloading_paid = payload.unloading_paid
     point.remarks = payload.remarks
+
+    # The article sheet wins where there is one.
+    #
+    # Two screens write this field. On furniture the driver counts the
+    # articles and the rates decide what goes out, which is the figure the
+    # vendor's charge is a subtraction from. The cash box on this form is for
+    # everything else — a division with no article rates, where what he handed
+    # over is the only record there is. Letting the form overwrite a priced
+    # sheet means a driver who leaves the box blank zeroes his own unloading
+    # pay after carrying forty chairs up three floors.
+    logged_articles = bool([row for row in point.unloading_items if row.quantity > 0])
+    if not logged_articles:
+        point.unloading_paid = payload.unloading_paid
     point.departed_at = datetime.now()
     point.status = (
         FreightPointStatus.DELIVERED
@@ -1019,7 +1089,7 @@ def deliver_point(
         else FreightPointStatus.PART_DELIVERED
     )
 
-    if payload.unloading_paid > 0:
+    if payload.unloading_paid > 0 and not logged_articles:
         db.add(
             TripExpense(
                 freight_id=point.freight_id,
@@ -1036,6 +1106,81 @@ def deliver_point(
     if freight.status == FreightStatus.DISPATCHED:
         freight.status = FreightStatus.IN_TRANSIT
     db.commit()
+
+
+class EarningLineOut(BaseModel):
+    label: str
+    amount: Decimal
+    working: str
+
+
+class TripEarningsOut(BaseModel):
+    trip_no: str
+    trip_date: date
+    vehicle_no: str | None
+    km: int
+    points: int
+    lines: list[EarningLineOut]
+    total: Decimal
+    # True once the trip is closed and the figures are what he WILL be paid
+    # rather than what he is on course for.
+    is_final: bool
+
+
+@router.get("/freights/{freight_id}/earnings", response_model=TripEarningsOut)
+def my_trip_earnings(
+    freight_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.DRIVER)),
+) -> TripEarningsOut:
+    """What this run pays him, and how it was worked out.
+
+    A month's total tells a driver nothing he can check. This is the one he
+    can: his rate, the distance he actually drove, what the unloading came to
+    article by article, and the sum of them. If it is wrong he can say which
+    line is wrong, which is the difference between a query and a grievance.
+
+    His side only. Nothing here says what the vendor was charged.
+    """
+    if not user.can_view_earnings:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Earnings are not shown on this login",
+        )
+
+    driver = _driver_for(db, user)
+    freight = db.get(Freight, freight_id)
+    if freight is None:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    mine = [leg for leg in freight.legs if str(leg.driver_id) == str(driver.id)]
+    if not mine:
+        raise HTTPException(status_code=404, detail="You did not drive this trip")
+
+    lines: list[EarningLineOut] = []
+    total = Decimal("0")
+    km = 0
+    for leg in mine:
+        leg_lines, leg_total = driver_earnings_for_leg(db, leg)
+        km += leg.leg_distance_km or 0
+        total += leg_total
+        lines.extend(EarningLineOut(**line.__dict__) for line in leg_lines)
+
+    vehicle_no = next(
+        (leg.vehicle.registration_no for leg in mine if leg.vehicle is not None), None
+    )
+
+    return TripEarningsOut(
+        trip_no=freight.trip_no,
+        trip_date=freight.trip_date,
+        vehicle_no=vehicle_no,
+        km=km,
+        points=freight.billable_point_count,
+        lines=lines,
+        total=money(total),
+        is_final=freight.status
+        in (FreightStatus.COMPLETED, FreightStatus.BILLED, FreightStatus.SETTLED),
+    )
 
 
 class EarningsOut(BaseModel):

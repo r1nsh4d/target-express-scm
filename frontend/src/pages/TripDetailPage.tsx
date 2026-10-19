@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
+  Check,
   Copy,
   FileWarning,
   HandCoins,
@@ -35,10 +36,11 @@ import {
 } from '@/components/ui'
 import type { ChargeSheetData } from '@/components/ChargeSheet'
 import { ChargeSheet } from '@/components/ChargeSheet'
+import { FreightMoney } from '@/components/FreightMoney'
 import { EditTripModal, OverrideStatusModal } from '@/components/TripEditModals'
 import { api, apiErrorMessage } from '@/lib/api'
 import { BRAND } from '@/lib/brand'
-import type { Driver, Freight, FreightLeg, FreightPoint, Quote, Vehicle } from '@/lib/resources'
+import type { Driver, Freight, FreightLeg, FreightPoint, Vehicle } from '@/lib/resources'
 import { STATUS_TONE, rupees, useAction, useItem, useList } from '@/lib/resources'
 
 // The map only loads when a point's location is actually being edited.
@@ -53,7 +55,6 @@ export default function TripDetailPage() {
   const path = `/freights/${id}`
 
   const trip = useItem<Freight>(path, !!id)
-  const quote = useItem<Quote>(`${path}/quote`, !!id)
   const vehicles = useList<Vehicle>('/vehicles')
   const drivers = useList<Driver>('/drivers')
 
@@ -414,64 +415,10 @@ export default function TripDetailPage() {
         </Card>
 
         <div className="space-y-5">
-          <Card className="overflow-hidden">
-            <div className="px-4 py-3.5">
-              <h2 className="text-sm font-semibold">What this bills</h2>
-              <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                On the rate card in force on {t.trip_date}.
-              </p>
-            </div>
-            {quote.isError ? (
-              <div className="px-4 pb-4">
-                <ErrorNote>
-                  {apiErrorMessage(quote.error, 'No rate card covers this trip date')}
-                </ErrorNote>
-              </div>
-            ) : quote.data ? (
-              <div className="hairline">
-                <QuoteRow label="Base trip" value={quote.data.base_amount} />
-                <QuoteRow
-                  label={`Extra distance (${quote.data.extra_km} km)`}
-                  value={quote.data.extra_km_amount}
-                />
-                <QuoteRow
-                  label={`Points (${quote.data.extra_points} extra)`}
-                  value={quote.data.extra_point_amount}
-                />
-                <QuoteRow label="Unloading" value={quote.data.unloading} />
-                <QuoteRow label="Toll" value={quote.data.toll} />
-                <div
-                  className="flex items-center justify-between border-t px-4 py-3"
-                  style={{ borderColor: 'var(--border)' }}
-                >
-                  <span className="text-[13px] font-semibold">Total</span>
-                  <span className="tnum text-[15px] font-semibold">
-                    {rupees(quote.data.line_total)}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div className="flex justify-center py-8">
-                <Spinner className="size-5" />
-              </div>
-            )}
-          </Card>
-
-          {quote.data?.trace?.length ? (
-            <Card className="p-4">
-              <h3 className="text-[11px] font-semibold tracking-[0.14em] uppercase" style={{ color: 'var(--text-faint)' }}>
-                How it was worked out
-              </h3>
-              <ul className="mt-2 space-y-1">
-                {quote.data.trace.map((line, i) => (
-                  <li key={i} className="tnum text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                    {line}
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          ) : null}
-
+          {/* What it bills used to live here on its own, with what it pays
+              out further down the page, so "was this trip worth running"
+              was a subtraction somebody did in their head between two cards.
+              Both sides and the gap are now one block below the grid. */}
           <UnloadingSheets freightId={t.id} />
 
           <TripAccount path={path} />
@@ -515,6 +462,10 @@ export default function TripDetailPage() {
           ) : null}
         </div>
       </div>
+
+      {/* In, out, and what is left. Full width because the whole point is
+          that the two sides sit beside each other. */}
+      <FreightMoney freightId={t.id} />
 
       <AssignModal
         open={assignOpen}
@@ -656,20 +607,6 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
         </p>
       ) : null}
     </Card>
-  )
-}
-
-function QuoteRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      className="flex items-center justify-between border-t px-4 py-2"
-      style={{ borderColor: 'var(--border)' }}
-    >
-      <span className="text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
-        {label}
-      </span>
-      <span className="tnum text-[13px]">{rupees(value)}</span>
-    </div>
   )
 }
 
@@ -964,6 +901,9 @@ function LocationModal({
   const save = useAction<Record<string, unknown>>(
     `${path}/points/${point?.id}`,
     {
+      // Editing a point that already exists, so PATCH. The default POST was
+      // landing on no route at all and coming back as "Method Not Allowed".
+      method: 'patch',
       onSuccess: () => {
         onDone()
         onClose()
@@ -1155,9 +1095,17 @@ function BillsModal({
   const [picked, setPicked] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
 
-  // Only this customer's unassigned bills can go on this stop.
-  const bills = useList<BillRow>('/consignments', { unassigned: true }, !!point)
-  const mine = (bills.data ?? []).filter((b) => b.consignee_id === point?.consignee_id)
+  /* Two lists, not one.
+   *
+   * This asked only for UNASSIGNED bills, so a stop that already had its bill
+   * attached showed "No unassigned bills for this customer" — which reads as
+   * "the bill has gone", on a screen that says "1 bill · 6 boxes" two inches
+   * above it. What is already here has to be visible before what could be
+   * added to it. */
+  const bills = useList<BillRow>('/consignments', undefined, !!point)
+  const forCustomer = (bills.data ?? []).filter((b) => b.consignee_id === point?.consignee_id)
+  const attached = forCustomer.filter((b) => b.freight_point_id === point?.id)
+  const available = forCustomer.filter((b) => b.freight_point_id === null)
 
   const assign = useAction<{ consignment_ids: string[] }>(
     `${path}/points/${point?.id}/consignments`,
@@ -1182,44 +1130,81 @@ function BillsModal({
       }
     >
       <div className="space-y-4">
-        {mine.length === 0 ? (
-          <EmptyState
-            icon={<Package2 className="size-7" />}
-            title="No unassigned bills for this customer"
-            description="Create the consignment first, under Consignments."
-          />
-        ) : (
-          <div className="space-y-2">
-            {mine.map((b) => (
-              <label
-                key={b.id}
-                className="flex cursor-pointer items-center gap-3 px-3.5 py-2.5"
-                style={{
-                  background: 'var(--bg)',
-                  borderRadius: 'var(--radius-control)',
-                  boxShadow: 'var(--neu-inset)',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  className="size-4"
-                  style={{ accentColor: 'var(--accent)' }}
-                  checked={picked.includes(b.id)}
-                  onChange={(e) =>
-                    setPicked(
-                      e.target.checked ? [...picked, b.id] : picked.filter((id) => id !== b.id),
-                    )
-                  }
-                />
-                <span className="flex-1 text-[13px]">
-                  Bill <span className="font-medium">{b.vendor_bill_no}</span>
-                  <span className="tnum ml-2" style={{ color: 'var(--text-faint)' }}>
-                    {b.bill_date}
+        {attached.length ? (
+          <div>
+            <p className="eyebrow mb-1.5">Already on this stop</p>
+            <div className="space-y-2">
+              {attached.map((b) => (
+                <div
+                  key={b.id}
+                  className="flex items-center gap-3 px-3.5 py-2.5"
+                  style={{
+                    background: 'var(--accent-dim)',
+                    borderRadius: 'var(--radius-control)',
+                  }}
+                >
+                  <Check className="size-4 shrink-0" style={{ color: 'var(--accent)' }} />
+                  <span className="flex-1 text-[13px]">
+                    Bill <span className="font-medium">{b.vendor_bill_no}</span>
+                    <span className="tnum ml-2" style={{ color: 'var(--text-faint)' }}>
+                      {b.bill_date}
+                    </span>
                   </span>
-                </span>
-                <span className="tnum text-[13px]">{b.declared_box_count} boxes</span>
-              </label>
-            ))}
+                  <span className="tnum text-[13px]">{b.declared_box_count} boxes</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {available.length === 0 ? (
+          attached.length ? (
+            <p className="text-[12.5px]" style={{ color: 'var(--text-muted)' }}>
+              Nothing else of this customer's is waiting to be put on a trip. Another bill for
+              them would be created under Consignments, or typed into the day sheet.
+            </p>
+          ) : (
+            <EmptyState
+              icon={<Package2 className="size-7" />}
+              title="No bills for this customer yet"
+              description="Create the consignment first, under Consignments — or type the day's bills into the day sheet and it will do both at once."
+            />
+          )
+        ) : (
+          <div>
+            {attached.length ? <p className="eyebrow mb-1.5">Waiting to be attached</p> : null}
+            <div className="space-y-2">
+              {available.map((b) => (
+                <label
+                  key={b.id}
+                  className="flex cursor-pointer items-center gap-3 px-3.5 py-2.5"
+                  style={{
+                    background: 'var(--bg)',
+                    borderRadius: 'var(--radius-control)',
+                    boxShadow: 'var(--neu-inset)',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    className="size-4"
+                    style={{ accentColor: 'var(--accent)' }}
+                    checked={picked.includes(b.id)}
+                    onChange={(e) =>
+                      setPicked(
+                        e.target.checked ? [...picked, b.id] : picked.filter((id) => id !== b.id),
+                      )
+                    }
+                  />
+                  <span className="flex-1 text-[13px]">
+                    Bill <span className="font-medium">{b.vendor_bill_no}</span>
+                    <span className="tnum ml-2" style={{ color: 'var(--text-faint)' }}>
+                      {b.bill_date}
+                    </span>
+                  </span>
+                  <span className="tnum text-[13px]">{b.declared_box_count} boxes</span>
+                </label>
+              ))}
+            </div>
           </div>
         )}
 

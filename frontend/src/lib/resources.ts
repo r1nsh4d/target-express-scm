@@ -43,11 +43,19 @@ export function useCreate<TBody, TResult = unknown>(
 
 export function useAction<TBody, TResult = unknown>(
   path: string,
-  options?: { onSuccess?: (result: TResult) => void; invalidate?: string[] },
+  options?: {
+    onSuccess?: (result: TResult) => void
+    invalidate?: string[]
+    /* POST unless said otherwise. Several endpoints that edit something that
+       already exists are PATCH, and calling those with the default produced a
+       405 the user saw as "Method Not Allowed" on a form that looked fine. */
+    method?: 'post' | 'patch'
+  },
 ) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (body: TBody) => (await api.post<TResult>(path, body)).data,
+    mutationFn: async (body: TBody) =>
+      (await api[options?.method ?? 'post']<TResult>(path, body)).data,
     onSuccess: (result) => {
       options?.invalidate?.forEach((key) =>
         queryClient.invalidateQueries({ queryKey: [key] }),

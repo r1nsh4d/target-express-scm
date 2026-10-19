@@ -64,9 +64,27 @@ interface ParseOut {
 interface Override {
   consignee_id?: string | null
   newCustomerName?: string
+  /* Where the lorry goes.
+     A new dealer used to be created with a name and nothing else, and the
+     trip came out with no destination on its header and nothing for the
+     driver to navigate to. "Add it later under Customers" is the step that
+     never happens, so it is asked for here, on the line where the name is
+     typed. */
+  newCustomerWhere?: string
   box_count?: number
+  /* What is on the bill, by article code. Only used where the vendor prices
+     unloading per article — six boxes says nothing about whether they are
+     chairs or wardrobes, and that is the difference between ₹300 and ₹900 of
+     unloading. */
+  articles?: Record<string, number>
   vendor_bill_no?: string
   dropped?: boolean
+}
+
+interface ArticleRate {
+  id: string
+  item_code: string
+  item_name: string
 }
 
 const EXAMPLE = `GDJ/8870 Rinshad Km 6
@@ -81,6 +99,16 @@ export default function DaySheetPage() {
 
   const [divisionId, setDivisionId] = useState('')
   const [warehouseId, setWarehouseId] = useState('')
+
+  /* The articles this vendor prices unloading on, if any.
+     Spare-parts divisions have none and the article row never appears — a
+     list nobody can fill in is worse than not asking. */
+  const articleRates = useList<ArticleRate>(
+    '/unloading-rates',
+    { vendor_division_id: divisionId },
+    !!divisionId,
+  )
+  const articles = articleRates.data ?? []
   const [tripDate, setTripDate] = useState(new Date().toISOString().slice(0, 10))
   const [makeFreight, setMakeFreight] = useState(true)
 
@@ -138,7 +166,15 @@ export default function DaySheetPage() {
           : (o.newCustomerName ?? line.customer_text)
 
         const billNo = o.vendor_bill_no ?? line.vendor_bill_no ?? ''
-        const boxes = o.box_count ?? line.box_count ?? 0
+
+        /* Articles win over a box count where they have been entered. A
+           carton of furniture IS the article, so letting the two drift apart
+           would mean either the labels or the unloading charge is wrong with
+           nothing on screen saying which. */
+        const picked = Object.entries(o.articles ?? {}).filter(([, n]) => n > 0)
+        const boxes = picked.length
+          ? picked.reduce((sum, [, n]) => sum + n, 0)
+          : (o.box_count ?? line.box_count ?? 0)
 
         const blockers: string[] = []
         if (!billNo) blockers.push('a bill number')
@@ -199,15 +235,25 @@ export default function DaySheetPage() {
           trip_date: tripDate,
           create_freight: makeFreight,
           stop_order: stops.map((s) => s.id).filter((id) => !id.startsWith('new:')),
-          rows: rows.map((r) => ({
-            vendor_bill_no: r.billNo,
-            box_count: r.boxes,
-            item_name: r.line.item_name,
-            consignee_id: r.consigneeId,
-            new_customer: r.consigneeId
-              ? null
-              : { name: r.o.newCustomerName ?? r.line.customer_text },
-          })),
+          rows: rows.map((r) => {
+            const picked = Object.entries(r.o.articles ?? {}).filter(([, n]) => n > 0)
+            return {
+              vendor_bill_no: r.billNo,
+              // Sent only when there are no articles — with them, the server
+              // takes the count from the articles and refuses a figure that
+              // disagrees.
+              box_count: picked.length ? null : r.boxes,
+              articles: picked.map(([item_code, quantity]) => ({ item_code, quantity })),
+              item_name: r.line.item_name,
+              consignee_id: r.consigneeId,
+              new_customer: r.consigneeId
+                ? null
+                : {
+                    name: r.o.newCustomerName ?? r.line.customer_text,
+                    city: r.o.newCustomerWhere?.trim() || null,
+                  },
+            }
+          }),
         })
       ).data,
     onSuccess: (result) => {
@@ -378,6 +424,7 @@ export default function DaySheetPage() {
                   row={r}
                   index={i}
                   customers={consignees.data ?? []}
+                  articleRates={articles}
                   onSet={(patch) => set(r.line.line_no, patch)}
                 />
               ))}
@@ -557,6 +604,7 @@ function LineRow({
   row,
   index,
   customers,
+  articleRates,
   onSet,
 }: {
   row: {
@@ -570,9 +618,11 @@ function LineRow({
   }
   index: number
   customers: Consignee[]
+  articleRates: ArticleRate[]
   onSet: (patch: Override) => void
 }) {
   const { line, consigneeId, billNo, boxes, blockers } = row
+  const usingArticles = Object.values(row.o.articles ?? {}).some((n) => n > 0)
   const score = line.match?.score ?? 0
   const unsure = !!line.match?.consignee_id && score < 0.86
   const isNew = !consigneeId
@@ -628,8 +678,20 @@ function LineRow({
               onChange={(e) => onSet({ newCustomerName: e.target.value })}
               aria-label="New customer name"
             />
+            {/* Where, on the same line as who.
+                A dealer's name is not a place, and a stop created without one
+                leaves the trip header blank and the driver with nothing to
+                navigate to. Asked here because "add it later under Customers"
+                is the step that never happens. */}
+            <Input
+              className="w-[9rem] shrink-0"
+              value={row.o.newCustomerWhere ?? ''}
+              placeholder="Town or area"
+              onChange={(e) => onSet({ newCustomerWhere: e.target.value })}
+              aria-label="Where this customer is"
+            />
             <Select
-              className="w-[11rem] shrink-0"
+              className="w-[9rem] shrink-0"
               value="__new__"
               onChange={(e) => onSet({ consignee_id: e.target.value })}
             >
@@ -668,6 +730,10 @@ function LineRow({
           type="number"
           min={1}
           value={boxes || ''}
+          // With articles entered, they are the count. Typing over it would
+          // put two figures on the row that can disagree, and the server
+          // refuses that rather than guessing which one is right.
+          disabled={usingArticles}
           onChange={(e) => onSet({ box_count: Number(e.target.value) || 0 })}
           aria-label="Boxes"
         />
@@ -676,6 +742,68 @@ function LineRow({
           <Trash2 className="size-3.5" />
         </IconBtn>
       </div>
+
+      {/* What is on the bill, where the vendor prices unloading per article.
+          Six boxes says nothing about whether they are chairs or wardrobes,
+          and that is the difference between ₹300 and ₹900 of unloading — so
+          on a furniture division the articles are asked for here rather than
+          discovered at the dealer's door. */}
+      {articleRates.length ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 px-1">
+          {articleRates.map((rate) => {
+            const n = row.o.articles?.[rate.item_code] ?? 0
+            return (
+              <span
+                key={rate.item_code}
+                className="inline-flex items-center gap-1 rounded-full border py-0.5 pr-1 pl-2.5 text-[11.5px]"
+                style={
+                  n > 0
+                    ? { borderColor: 'var(--accent)', background: 'var(--accent-dim)' }
+                    : { borderColor: 'var(--border)', color: 'var(--text-muted)' }
+                }
+              >
+                {rate.item_name}
+                {n > 0 ? <span className="tnum font-semibold">{n}</span> : null}
+                <button
+                  type="button"
+                  className="grid size-5 place-items-center rounded-full disabled:opacity-25"
+                  style={{ color: 'var(--text-muted)' }}
+                  disabled={n === 0}
+                  aria-label={`One less ${rate.item_name}`}
+                  onClick={() =>
+                    onSet({
+                      articles: {
+                        ...(row.o.articles ?? {}),
+                        [rate.item_code]: Math.max(0, n - 1),
+                      },
+                    })
+                  }
+                >
+                  −
+                </button>
+                <button
+                  type="button"
+                  className="grid size-5 place-items-center rounded-full"
+                  style={{ background: 'var(--surface-hover)' }}
+                  aria-label={`One more ${rate.item_name}`}
+                  onClick={() =>
+                    onSet({
+                      articles: { ...(row.o.articles ?? {}), [rate.item_code]: n + 1 },
+                    })
+                  }
+                >
+                  +
+                </button>
+              </span>
+            )
+          })}
+          {usingArticles ? (
+            <span className="tnum text-[11.5px]" style={{ color: 'var(--text-faint)' }}>
+              {boxes} {boxes === 1 ? 'carton' : 'cartons'}, one per article
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Only when it is worth saying. */}
       {needsLook || unsure || isNew || line.item_name ? (
@@ -688,7 +816,10 @@ function LineRow({
           {isNew && !needsLook ? (
             <span style={{ color: 'var(--accent)' }}>
               Nobody on file matches “{line.customer_text}” — this will be created as a new
-              customer. Add their address and phone later under Customers.
+              customer.
+              {row.o.newCustomerWhere?.trim()
+                ? ' The pin can be dropped on the trip screen.'
+                : ' Put the town in beside the name, or the trip has no destination and the driver has nothing to navigate to.'}
             </span>
           ) : null}
           {unsure && !needsLook ? (

@@ -37,6 +37,7 @@ interface Sheet {
   coolie_paid: string
   coolie_note: string | null
   priced_per_article: boolean
+  charges_unloading: boolean
   shows_earnings: boolean
 }
 
@@ -119,9 +120,30 @@ export function UnloadingSheet({
   }
   if (!sheet.data) return null
 
-  // Spare parts are carried in and nothing is charged. A list of articles
-  // nobody can fill in would be worse than not asking.
-  if (!sheet.data.priced_per_article) return null
+  /* Spare parts are carried in and nothing is charged, so there is nothing to
+     ask. But a furniture vendor whose article rates have not been entered
+     looks identical from here, and this used to return null for both — the
+     screen simply vanished, the driver could log nothing, the vendor was
+     charged nothing, and no part of the system said why.
+
+     So the two are told apart, and the second one says so. He cannot fix it
+     from a lorry bay; what he can do is stop waiting for a screen that is
+     never going to appear, and ring the office. */
+  if (!sheet.data.priced_per_article) {
+    if (!sheet.data.charges_unloading) return null
+    return (
+      <div
+        className="rounded-[var(--radius-control)] px-3.5 py-3 text-[13px]"
+        style={{ background: 'color-mix(in oklab, var(--warning) 14%, transparent)' }}
+      >
+        <p className="font-medium">Unloading cannot be logged for this vendor yet</p>
+        <p className="mt-1 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+          Their card charges unloading per article, but no article rates are on file. Tell the
+          office — until they are added, nothing can be billed for carrying this in.
+        </p>
+      </div>
+    )
+  }
 
   /* Decided on the server. A driver on a rented vehicle is paid by the
      vehicle's owner, not by Target Express, so his side arrives zeroed and

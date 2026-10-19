@@ -432,6 +432,8 @@ function FreightDetail({ id, onBack }: { id: string; onBack: () => void }) {
         </p>
       </Card>
 
+      <TripEarnings freightId={id} />
+
       <ErrorNote>{error}</ErrorNote>
 
       {trip.start_odometer === null ? (
@@ -503,6 +505,93 @@ function FreightDetail({ id, onBack }: { id: string; onBack: () => void }) {
 }
 
 /* -------------------------------------------------------------------------- */
+
+/* What this run pays him, and how it was worked out.
+ *
+ * A month's total tells a driver nothing he can check, and "₹475 earned this
+ * month" on the home screen is exactly the figure that starts an argument
+ * nobody can settle. This is the one he can check: his rate, the distance he
+ * actually drove, what the unloading came to, and the sum. If it is wrong he
+ * can say which line is wrong.
+ *
+ * His side only. Nothing here says what the vendor was charged — that is not
+ * his business, and putting it in front of him invites the one conversation
+ * a lorry bay does not need.
+ *
+ * It says plainly whether the figures are firm. Before the trip closes they
+ * move with the odometer, and a driver who sees ₹250 on Tuesday and ₹410 on
+ * Wednesday needs to have been told why.
+ */
+function TripEarnings({ freightId }: { freightId: string }) {
+  const { data, isError } = useQuery({
+    queryKey: ['driver-trip-earnings', freightId],
+    queryFn: async () =>
+      (
+        await api.get<{
+          km: number
+          points: number
+          lines: { label: string; amount: string; working: string }[]
+          total: string
+          is_final: boolean
+        }>(`/driver/freights/${freightId}/earnings`)
+      ).data,
+    // A 403 is the honest answer for a driver on a rented lorry: he is paid
+    // by the vehicle's owner, not by Target Express. Nothing is shown, rather
+    // than a zero that reads as a missing payment.
+    retry: false,
+  })
+
+  if (isError || !data || !data.lines.length) return null
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-[14px] font-semibold">What you earn on this run</h3>
+        <span className="text-[11.5px]" style={{ color: 'var(--text-faint)' }}>
+          {data.is_final ? 'final' : 'so far'}
+        </span>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {data.lines.map((line, i) => (
+          <div key={`${line.label}-${i}`} className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[13.5px]">{line.label}</p>
+              {line.working ? (
+                <p className="tnum mt-0.5 text-[11.5px]" style={{ color: 'var(--text-faint)' }}>
+                  {line.working}
+                </p>
+              ) : null}
+            </div>
+            <span className="tnum shrink-0 text-[14px] font-medium">{rupees(line.amount)}</span>
+          </div>
+        ))}
+      </div>
+
+      <div
+        className="mt-3 flex items-baseline justify-between border-t pt-3"
+        style={{ borderColor: 'var(--border)' }}
+      >
+        <span className="text-[14px] font-semibold">
+          Total for this freight
+          <span className="ml-2 text-[12px] font-normal" style={{ color: 'var(--text-muted)' }}>
+            {data.km} km
+          </span>
+        </span>
+        <span className="tnum text-[20px] font-semibold" style={{ color: 'var(--success)' }}>
+          {rupees(data.total)}
+        </span>
+      </div>
+
+      {!data.is_final ? (
+        <p className="mt-2 text-[11.5px]" style={{ color: 'var(--text-faint)' }}>
+          This moves until the trip is closed — the distance is not final until you put in the
+          closing meter reading.
+        </p>
+      ) : null}
+    </Card>
+  )
+}
 
 function PointCard({
   point,

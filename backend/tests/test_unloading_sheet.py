@@ -50,7 +50,6 @@ def door(client):
         ConsigneeType,
         FreightStatus,
         GeoConfidence,
-        UnloadingBasis,
         UserRole,
     )
     from app.models.fleet import Driver, Vehicle, VehicleOwner
@@ -442,13 +441,14 @@ def test_a_driver_who_is_not_paid_by_us_is_not_shown_a_figure(client, door):
     Zeroed on the server rather than hidden by the screen: a number that must
     not be shown should not be sent.
     """
+    from sqlalchemy import select
+
     from app.core.security import create_access_token, hash_password
     from app.db.session import SessionLocal
     from app.models.enums import UserRole
     from app.models.fleet import Driver
     from app.models.freight import FreightLeg
     from app.models.user import User
-    from sqlalchemy import select
 
     db = SessionLocal()
     hired = User(
@@ -482,3 +482,102 @@ def test_a_driver_who_is_not_paid_by_us_is_not_shown_a_figure(client, door):
     # The vendor's side is still his business — he has to log the articles.
     chair = next(a for a in body["articles"] if a["item_code"] == "CHAIR")
     assert Decimal(chair["vendor_each"]) == Decimal("70.00")
+
+
+# ---------------------------------------------------------------------------
+# What leaves the pocket, and what the screen says when it cannot ask
+# ---------------------------------------------------------------------------
+
+
+def _point(point_id):
+    from app.db.session import SessionLocal
+    from app.models.freight import FreightPoint
+
+    db = SessionLocal()
+    try:
+        p = db.get(FreightPoint, point_id)
+        return {
+            "unloading_billed": Decimal(p.unloading_billed),
+            "unloading_paid": Decimal(p.unloading_paid),
+        }
+    finally:
+        db.close()
+
+
+def test_logging_records_what_goes_out_as_well_as_what_is_charged(client, door):
+    """Both numbers, from one count.
+
+    This wrote only `unloading_billed`, so the cash the driver hands the
+    labourers stayed at zero on every point. The trip screen then read
+    "Unloading 140.00 (paid 0.00)" on every furniture stop, and a driver on
+    the older percentage-of-what-was-paid arrangement earned a percentage of
+    nothing.
+    """
+    assert _log(client, door, articles=[{"item_code": "CHAIR", "quantity": 2}]).status_code == 200
+
+    point = _point(door["point"])
+    assert point["unloading_billed"] == Decimal("140.00")
+    assert point["unloading_paid"] == Decimal("84.00")
+
+
+def test_the_delivery_form_does_not_overwrite_a_priced_sheet(client, door):
+    """Two screens write this field, and the priced one has to win.
+
+    He logs the articles, then delivers. The cash box on the delivery form is
+    for divisions with no article rates; letting it through here means a
+    driver who leaves it blank zeroes his own unloading pay after carrying
+    forty chairs up three floors.
+    """
+    _log(client, door, articles=[{"item_code": "CHAIR", "quantity": 2}])
+
+    res = client.post(
+        f"/api/driver/points/{door['point']}/deliver",
+        json={"delivered_box_count": 2, "unloading_paid": "0"},
+        headers=door["headers"],
+    )
+    assert res.status_code == 204, res.text
+    assert _point(door["point"])["unloading_paid"] == Decimal("84.00")
+
+
+def test_a_vendor_who_charges_unloading_with_no_rates_says_so(client, door):
+    """Rather than the screen simply vanishing.
+
+    "Nothing is charged here" and "nobody has entered the rates yet" looked
+    identical from the rates table, and both returned a sheet the phone drew
+    as nothing at all — so the driver could log nothing, the vendor was
+    charged nothing, and no part of the system said why.
+    """
+    from sqlalchemy import select
+
+    from app.db.session import SessionLocal
+    from app.models.enums import UnloadingBasis
+    from app.models.freight import Freight
+    from app.models.rating import RateCard, UnloadingItemRate
+
+    db = SessionLocal()
+    try:
+        freight = db.get(Freight, door["freight"])
+        db.add(
+            RateCard(
+                vendor_division_id=freight.vendor_division_id,
+                base_trip_amount=Decimal("1867"),
+                included_km=60,
+                included_points=3,
+                extra_km_rate=Decimal("17"),
+                extra_point_rate=Decimal("175"),
+                unloading_basis=UnloadingBasis.PER_ITEM_FLOOR,
+                effective_from=freight.trip_date,
+                is_active=True,
+            )
+        )
+        for rate in db.execute(select(UnloadingItemRate)).scalars().all():
+            rate.is_active = False
+        db.commit()
+    finally:
+        db.close()
+
+    body = _sheet(client, door).json()
+    assert body["priced_per_article"] is False
+    # The card still says furniture unloading is charged, so this is a gap to
+    # close rather than a vendor who pays nothing.
+    assert body["charges_unloading"] is True

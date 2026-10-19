@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import WAREHOUSE_ROLES, require_roles
+from app.api.routes.freights import _next_trip_no
 from app.db.session import get_db
 from app.models.consignee import Consignee
 from app.models.consignment import Box, Consignment
@@ -38,11 +39,11 @@ from app.models.enums import (
     GeoConfidence,
 )
 from app.models.freight import Freight, FreightPoint
+from app.models.rating import UnloadingItemRate
 from app.models.user import User
 from app.models.vendor import VendorDivision, VendorWarehouse
 from app.services import daysheet
 from app.services.sheetread import read_sheet, to_lines
-from app.api.routes.freights import _next_trip_no
 
 router = APIRouter(prefix="/api/daysheet", tags=["daysheet"])
 
@@ -256,16 +257,45 @@ class NewCustomerIn(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     city: str | None = None
     phone: str | None = None
+    # Where the lorry actually goes.
+    #
+    # A customer created here used to arrive with a name and nothing else, so
+    # the freight had no destination on its header, the driver had no address
+    # to navigate to, and the delivery note printed a blank line. A dealer's
+    # name is not a place.
+    address: str | None = None
+
+
+class RowArticleIn(BaseModel):
+    """One kind of article on a bill, and how many of them."""
+
+    item_code: str = Field(min_length=1, max_length=48)
+    quantity: int = Field(ge=1, le=999)
 
 
 class DayRowIn(BaseModel):
     vendor_bill_no: str = Field(min_length=1, max_length=64)
-    box_count: int = Field(ge=1, le=999)
+    # Optional when articles are given, because then the articles say how many
+    # there are and two figures that can disagree is one too many.
+    box_count: int | None = Field(default=None, ge=1, le=999)
     item_name: str | None = None
+    # What is on the bill, article by article.
+    #
+    # A box count alone cannot price unloading: a chair and a wardrobe are
+    # different work and different money, and "6 boxes" says nothing about
+    # which. Where the vendor prices unloading per article this is what the
+    # charge sheet, the labels and the driver's screen all start from.
+    articles: list[RowArticleIn] = []
     # One or the other. An id uses a customer already on file; a block of
     # details creates one.
     consignee_id: str | None = None
     new_customer: NewCustomerIn | None = None
+
+    @property
+    def total_boxes(self) -> int:
+        if self.articles:
+            return sum(a.quantity for a in self.articles)
+        return self.box_count or 0
 
 
 class CommitIn(BaseModel):
@@ -319,6 +349,24 @@ def commit(payload: CommitIn, db: Session = Depends(get_db), user: User = OpsDep
                 detail=f"Bill {row.vendor_bill_no} has no customer",
             )
 
+        if not row.total_boxes:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Bill {row.vendor_bill_no} has no boxes and no articles",
+            )
+
+        # Both given and disagreeing is a typo, and guessing which one is
+        # right means either the labels or the unloading charge comes out
+        # wrong with nothing on screen to say so.
+        if row.articles and row.box_count is not None and row.box_count != row.total_boxes:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Bill {row.vendor_bill_no} says {row.box_count} boxes but its articles "
+                    f"add up to {row.total_boxes}"
+                ),
+            )
+
     clash = db.execute(
         select(Consignment.vendor_bill_no).where(
             Consignment.vendor_division_id == division.id,
@@ -365,6 +413,7 @@ def commit(payload: CommitIn, db: Session = Depends(get_db), user: User = OpsDep
                 name=row.new_customer.name.strip(),
                 type=ConsigneeType.RETAIL_CUSTOMER,
                 city=(row.new_customer.city or "").strip() or None,
+                address=(row.new_customer.address or "").strip() or None,
                 phone=(row.new_customer.phone or "").strip() or None,
                 # Entered from a bill, with nobody looking at a map. Marked
                 # unverified so it shows up to be pinned rather than being
@@ -383,27 +432,58 @@ def commit(payload: CommitIn, db: Session = Depends(get_db), user: User = OpsDep
             consignee_id=consignee.id,
             vendor_bill_no=row.vendor_bill_no,
             bill_date=payload.trip_date or date.today(),
-            declared_box_count=row.box_count,
+            declared_box_count=row.total_boxes,
             status=ConsignmentStatus.RECEIVED,
         )
         db.add(consignment)
         db.flush()
 
         token = secrets.token_hex(3).upper()
-        for n in range(1, row.box_count + 1):
-            db.add(
-                Box(
-                    consignment_id=consignment.id,
-                    item_no=n,
-                    barcode=f"TE-{token}-{n:03d}",
-                    item_name=row.item_name,
-                    item_code=(
-                        row.item_name.upper().replace(" ", "_") if row.item_name else None
-                    ),
-                    status=BoxStatus.SORTED,
+
+        # One box per article, named.
+        #
+        # A carton of furniture IS the article — a chair, a wardrobe, a
+        # mattress — and what it is decides what unloading it earns. Boxes
+        # stamped with nothing could be labelled and counted but not priced,
+        # so a furniture run arrived at the point with no articles to tick.
+        if row.articles:
+            labels = {
+                r.item_code: r.item_name
+                for r in db.execute(
+                    select(UnloadingItemRate).where(
+                        UnloadingItemRate.vendor_division_id == division.id
+                    )
+                ).scalars()
+            }
+            n = 0
+            for article in row.articles:
+                for _ in range(article.quantity):
+                    n += 1
+                    db.add(
+                        Box(
+                            consignment_id=consignment.id,
+                            item_no=n,
+                            barcode=f"TE-{token}-{n:03d}",
+                            item_code=article.item_code,
+                            item_name=labels.get(article.item_code, article.item_code),
+                            status=BoxStatus.SORTED,
+                        )
+                    )
+        else:
+            for n in range(1, row.total_boxes + 1):
+                db.add(
+                    Box(
+                        consignment_id=consignment.id,
+                        item_no=n,
+                        barcode=f"TE-{token}-{n:03d}",
+                        item_name=row.item_name,
+                        item_code=(
+                            row.item_name.upper().replace(" ", "_") if row.item_name else None
+                        ),
+                        status=BoxStatus.SORTED,
+                    )
                 )
-            )
-        total_boxes += row.box_count
+        total_boxes += row.total_boxes
         consignments.append((consignment, str(consignee.id)))
 
     freight: Freight | None = None
@@ -435,16 +515,40 @@ def commit(payload: CommitIn, db: Session = Depends(get_db), user: User = OpsDep
         db.flush()
 
         points: dict[str, FreightPoint] = {}
+        where: list[str] = []
         for sequence, consignee_id in enumerate(order, start=1):
+            customer = db.get(Consignee, consignee_id)
             point = FreightPoint(
                 freight_id=freight.id,
                 sequence=sequence,
                 consignee_id=consignee_id,
                 floor_number=payload.floors.get(consignee_id, 0),
+                # Where the lorry is actually going, copied as it stands now.
+                #
+                # This was left empty, so the trip had no destination on its
+                # header, the driver's screen had nothing to navigate to and
+                # the charge sheet printed a blank location line — on exactly
+                # the trips built the quick way, which is most of them.
+                address_snapshot=(
+                    customer.address or customer.city if customer else None
+                ),
+                latitude=customer.latitude if customer else None,
+                longitude=customer.longitude if customer else None,
             )
             db.add(point)
             db.flush()
             points[consignee_id] = point
+            if customer:
+                where.append(customer.city or customer.name)
+
+        # The header line. Rendered again at dispatch from the same points;
+        # written here so a trip that has not left yet still says where it is
+        # going rather than showing the vendor's name and a date.
+        seen_places: list[str] = []
+        for place in where:
+            if place and place not in seen_places:
+                seen_places.append(place)
+        freight.destination_text = ", ".join(seen_places)[:500] or None
 
         # The step everyone forgets, done here as part of the same action.
         for consignment, consignee_id in consignments:

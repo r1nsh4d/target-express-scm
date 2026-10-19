@@ -296,6 +296,32 @@ def calculate_point_driver_pay(
     return result
 
 
+def items_at_point(point) -> list[UnloadItem]:
+    """What was carried in at this stop — the driver's count first.
+
+    Two sources disagree here, and which one wins is a pay decision.
+
+    The BOXES are what the bill says was sent. The driver's LOGGED ARTICLES are
+    what he counted through the door, which is the whole reason the logging
+    screen exists: the bill says five chairs, four came off the lorry, one was
+    refused at the door. Pricing the vendor off his count and paying the driver
+    off the boxes would charge for four and pay for five, and the margin on
+    that point quietly inverts.
+
+    So: his count wherever he recorded one, the boxes where he did not — a run
+    finished before the unloading screen existed, or a point he never opened,
+    still prices off something rather than off nothing.
+    """
+    logged = [
+        UnloadItem(item_code=row.item_code, quantity=row.quantity)
+        for row in point.unloading_items
+        if row.quantity > 0
+    ]
+    if logged:
+        return logged
+    return items_from_boxes([box for c in point.consignments for box in c.boxes])
+
+
 def division_pays_per_article(rates: dict[str, ItemRate]) -> bool:
     """Does this division pay its drivers per article at all?
 
