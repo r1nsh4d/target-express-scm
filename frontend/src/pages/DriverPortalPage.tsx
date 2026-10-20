@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   ChevronRight,
+  HelpCircle,
   Gauge,
   IndianRupee,
   LayoutDashboard,
@@ -1099,7 +1100,91 @@ function DriverHome({
           ))}
         </Card>
       ) : null}
+
+      <DriverHelp />
     </div>
+  )
+}
+
+/* How the run works, on the phone that runs it.
+ *
+ * The written guide is an office screen and a driver cannot open it — he is
+ * not on those routes — so every word of guidance aimed at him reached
+ * everybody except him. He was taught once, standing in a godown, by somebody
+ * with their own phone out.
+ *
+ * Closed by default, because a man who has done forty runs does not need it
+ * and should not have to scroll past it. Eight lines when opened, in the order
+ * he does them, with the two things that catch people out said plainly:
+ * nothing starts without the opening meter reading, and nothing is ever
+ * forced — a carton that will not scan is still delivered.
+ */
+function DriverHelp() {
+  const [open, setOpen] = useState(false)
+
+  const steps = [
+    'Before you leave: enter the meter reading and take a photo of it. The run will not start without it.',
+    'At each stop: scan the cartons. If one belongs to a different customer the phone stops you and tells you whose it is.',
+    'Hand them over, type who received them, and take a photo.',
+    'Tick what you carried inside — how many chairs, which floor. That is what you are paid for and what the shop signs for.',
+    'Porter money is a separate box from unloading. Keep them apart or the amounts cannot be explained later.',
+    'Paid a toll or bought diesel? Add it with a photo of the receipt before you forget.',
+    'Anything coming back: scan it at the godown before the lorry is emptied.',
+    'Last thing: the closing meter reading and its photo. That finishes the run.',
+  ]
+
+  return (
+    <Card className="overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
+      >
+        <span
+          className="grid size-8 shrink-0 place-items-center rounded-full"
+          style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}
+        >
+          <HelpCircle className="size-4" />
+        </span>
+        <span className="flex-1 text-[14px] font-medium">How a run works</span>
+        <ChevronRight
+          className="size-4 shrink-0 transition-transform"
+          style={{
+            color: 'var(--text-faint)',
+            transform: open ? 'rotate(90deg)' : undefined,
+          }}
+          aria-hidden
+        />
+      </button>
+
+      {open ? (
+        <div className="border-t px-4 py-3.5" style={{ borderColor: 'var(--border)' }}>
+          <ol className="space-y-2.5">
+            {steps.map((t, i) => (
+              <li key={t} className="flex gap-3 text-[13.5px] leading-relaxed">
+                <span
+                  className="tnum grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-semibold"
+                  style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}
+                >
+                  {i + 1}
+                </span>
+                <span>{t}</span>
+              </li>
+            ))}
+          </ol>
+
+          <p
+            className="mt-3 rounded-[10px] px-3 py-2.5 text-[12.5px] leading-relaxed"
+            style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}
+          >
+            Nothing here is forced. If a carton will not scan, type the count instead — the
+            delivery still goes through. If you are out of signal, carry on: the phone keeps
+            what you entered and sends it when the signal comes back.
+          </p>
+        </div>
+      ) : null}
+    </Card>
   )
 }
 

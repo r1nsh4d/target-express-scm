@@ -19,6 +19,8 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import { openCommandPalette } from '@/components/CommandPalette'
+import { GuideExtras } from '@/components/GuideExtras'
+import { YourRole } from '@/components/RoleGuide'
 import { WorkflowChart } from '@/components/WorkflowChart'
 import { Card, PageHeader } from '@/components/ui'
 
@@ -411,11 +413,17 @@ export default function GuidePage() {
         </div>
       </Card>
 
+      {/* Before the steps, because the first question a new login has is not
+          how a step works but whether this screen is even theirs. */}
+      <YourRole />
+
       <Section title="Set up, once per vendor" steps={SETUP} />
 
       <WhoDoesWhat />
 
       <Section title="Every working day" steps={RUN} />
+
+      <GuideExtras />
 
       <Card className="p-6">
         <h2 className="text-[15px] font-semibold">Words used here</h2>
@@ -429,6 +437,13 @@ export default function GuidePage() {
             ['Leg', 'One vehicle-and-driver stretch of a freight. A breakdown makes a second leg.'],
             ['Enquiry', 'A business that filled in the form on the website asking to work with us. They appear under Enquiries within seconds.'],
             ['Tracking link', 'What a customer uses to watch their own delivery. Sent on dispatch, and findable again from the website with the LR number and their phone.'],
+            ['Article', 'One thing carried in — a chair, a wardrobe, a mattress. Unloading is priced per article and per floor climbed, not per carton.'],
+            ['Unloading charge sheet', 'The form the dealer signs for what was carried in. Built from the driver’s own count, and printed behind the invoice so the unloading line has its working attached.'],
+            ['Coolie', 'Cash a local porter gang demanded before they would let the lorry be unloaded. Kept apart from unloading everywhere, because the vendor is reimbursing a demand rather than paying for our work.'],
+            ['Advance', 'Cash handed to a driver or vehicle owner before the work is settled. It comes off their next settlement on its own.'],
+            ['Agreed fare', 'A figure settled for one run instead of the per-kilometre rate. It replaces the calculation rather than adding to it.'],
+            ['Capability', 'What a role may do, enforced on the server. Hiding a screen is tidiness; removing a capability is the lock.'],
+            ['Details link', 'A one-use link sent to a customer so they can fill in their own address and drop their own pin. It reaches that one record and nothing else.'],
           ].map(([term, meaning]) => (
             <div key={term}>
               <dt className="text-[13px] font-medium">{term}</dt>
