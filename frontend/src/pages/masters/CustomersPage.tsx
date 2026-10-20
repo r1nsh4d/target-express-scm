@@ -123,6 +123,12 @@ export default function CustomersPage() {
                         kind: 'textarea' as const,
                         hint: 'Shown to the driver at the point',
                       },
+                      {
+                        name: 'location' as const,
+                        label: 'Delivery location',
+                        kind: 'location' as const,
+                        hint: 'What the driver navigates to. A pin set here counts as approximate — the customer’s own, dropped at their door, is the one marked verified.',
+                      },
                     ]}
                   />
                 }

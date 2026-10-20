@@ -16,7 +16,7 @@
 
 import { useQueryClient } from '@tanstack/react-query'
 import { Pencil, RotateCcw, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 
 import {
   Button,
@@ -30,6 +30,10 @@ import {
 } from '@/components/ui'
 import { api, apiErrorMessage } from '@/lib/api'
 
+const LocationPicker = lazy(() =>
+  import('@/components/LocationPicker').then((m) => ({ default: m.LocationPicker })),
+)
+
 export type FieldSpec =
   | {
       name: string
@@ -39,6 +43,12 @@ export type FieldSpec =
       required?: boolean
     }
   | { name: string; label: string; kind: 'checkbox'; hint?: string }
+  /* A map, writing `latitude` and `longitude`.
+     Every other field here is a box with a word in it, and a delivery
+     location is the one that cannot be. Without it the pin could be set when
+     a customer was CREATED, from the trip screen, or by the customer on their
+     own link — but never from the list where somebody goes to correct them. */
+  | { name: 'location'; label: string; kind: 'location'; hint?: string }
   | { name: string; label: string; kind: 'textarea'; hint?: string }
   | {
       name: string
@@ -207,6 +217,11 @@ function EditModal({
     setLoadedFor(row.id)
     const initial: Record<string, unknown> = {}
     for (const f of fields) {
+      if (f.kind === 'location') {
+        initial.latitude = row.latitude ?? null
+        initial.longitude = row.longitude ?? null
+        continue
+      }
       const value = row[f.name]
       initial[f.name] =
         f.kind === 'checkbox' ? !!value : value === null || value === undefined ? '' : String(value)
@@ -232,6 +247,20 @@ function EditModal({
 
       if (f.kind === 'checkbox') {
         if (!!before !== !!now) body[f.name] = !!now
+        continue
+      }
+
+      if (f.kind === 'location') {
+        // Sent together or not at all: half a coordinate is not a place.
+        const lat = draft.latitude as number | null
+        const lng = draft.longitude as number | null
+        const moved =
+          String(lat ?? '') !== String(row.latitude ?? '') ||
+          String(lng ?? '') !== String(row.longitude ?? '')
+        if (moved && lat !== null && lng !== null) {
+          body.latitude = lat
+          body.longitude = lng
+        }
         continue
       }
       const beforeText = before === null || before === undefined ? '' : String(before)
@@ -278,6 +307,34 @@ function EditModal({
                     checked={!!value}
                     onChange={(e) => set(f.name, e.target.checked)}
                   />
+                </div>
+              )
+            }
+
+            if (f.kind === 'location') {
+              const lat = draft.latitude as number | null
+              const lng = draft.longitude as number | null
+              return (
+                <div key={f.name} className="sm:col-span-2">
+                  <p className="mb-1.5 text-[13px] font-medium">{f.label}</p>
+                  {f.hint ? (
+                    <p className="mb-2 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                      {f.hint}
+                    </p>
+                  ) : null}
+                  <Suspense fallback={<div className="inset h-[240px] animate-pulse" />}>
+                    <LocationPicker
+                      value={lat !== null && lng !== null ? { lat: Number(lat), lng: Number(lng) } : null}
+                      onChange={(point) =>
+                        setDraft({
+                          ...draft,
+                          latitude: point ? point.lat : null,
+                          longitude: point ? point.lng : null,
+                        })
+                      }
+                      height={240}
+                    />
+                  </Suspense>
                 </div>
               )
             }

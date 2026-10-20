@@ -43,6 +43,7 @@ from app.db.session import get_db
 from app.models.billing import VendorInvoiceLine
 from app.models.consignee import Consignee
 from app.models.consignment import Consignment
+from app.models.enums import GeoConfidence
 from app.models.fleet import (
     Driver,
     Labour,
@@ -253,6 +254,21 @@ def update_consignee(
     """
     obj = _load(db, Consignee, item_id, "Customer")
     _apply(obj, payload)
+
+    # A pin dropped here is a good guess, not a confirmation.
+    #
+    # Without this the confidence never moved off UNVERIFIED, so a customer
+    # could carry an exact pin while every screen described them as having
+    # none — and the driver's app treats UNVERIFIED as "go and ask".
+    #
+    # APPROXIMATE rather than VERIFIED, deliberately. Somebody in the office
+    # placing a marker from a town name is doing something genuinely weaker
+    # than the customer standing at their own door, and collapsing the two
+    # would throw away the only signal that says which is which.
+    if payload.latitude is not None and payload.longitude is not None:
+        if obj.geo_confidence != GeoConfidence.VERIFIED:
+            obj.geo_confidence = GeoConfidence.APPROXIMATE
+
     db.commit()
     db.refresh(obj)
     return {"id": str(obj.id), "name": obj.name}

@@ -299,3 +299,75 @@ def test_the_warehouse_can_send_these_links(client, customer):
 
     res = client.post(f"/api/consignees/{customer}/details-link", headers=headers)
     assert res.status_code == 200, res.text
+
+
+# ---------------------------------------------------------------------------
+# The office correcting the same record
+# ---------------------------------------------------------------------------
+
+
+def test_the_office_can_fill_in_everything_the_customer_could(client, customer, auth):
+    """The link is the convenient path, not the only one. Somebody ringing
+    the dealer and writing it down must reach the same fields."""
+    res = client.patch(
+        f"/api/consignees/{customer}",
+        json={
+            "address": "Shop 4, MC Road",
+            "landmark": "Opposite the bus stand",
+            "contact_person": "Mathew",
+            "pincode": "686001",
+            "delivery_notes": "Side shutter after 6pm",
+            "alternate_phone": "9812300003",
+        },
+        headers=auth,
+    )
+    assert res.status_code == 200, res.text
+
+    mine = next(
+        c for c in client.get("/api/consignees", headers=auth).json() if c["id"] == customer
+    )
+    assert mine["address"] == "Shop 4, MC Road"
+    assert mine["contact_person"] == "Mathew"
+    assert mine["landmark"] == "Opposite the bus stand"
+
+
+def test_a_pin_set_by_the_office_is_approximate_not_verified(client, customer, auth):
+    """It never moved off UNVERIFIED at all, so a customer could carry an
+    exact pin while every screen said they had none — and the driver's app
+    reads UNVERIFIED as "go and ask".
+
+    APPROXIMATE rather than VERIFIED: somebody in the office placing a marker
+    from a town name is doing something genuinely weaker than the customer
+    standing at their own door.
+    """
+    client.patch(
+        f"/api/consignees/{customer}",
+        json={"latitude": "9.591", "longitude": "76.522"},
+        headers=auth,
+    )
+
+    mine = next(
+        c for c in client.get("/api/consignees", headers=auth).json() if c["id"] == customer
+    )
+    assert mine["geo_confidence"] == "APPROXIMATE"
+
+
+def test_the_office_does_not_downgrade_a_pin_the_customer_confirmed(
+    client, customer, auth
+):
+    """They stood at the door. A later office nudge is not better evidence."""
+    token = _token(_link(client, auth, customer))
+    client.post(
+        f"/api/my-details/{token}", json={"latitude": 9.591, "longitude": 76.522}
+    )
+
+    client.patch(
+        f"/api/consignees/{customer}",
+        json={"latitude": "9.592", "longitude": "76.523"},
+        headers=auth,
+    )
+
+    mine = next(
+        c for c in client.get("/api/consignees", headers=auth).json() if c["id"] == customer
+    )
+    assert mine["geo_confidence"] == "VERIFIED"
