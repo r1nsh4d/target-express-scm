@@ -4,7 +4,7 @@ Deliberately plain CRUD. The interesting rules live in the services; these
 endpoints only have to be predictable.
 """
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,7 +12,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import ADMIN_ROLES, BACK_OFFICE_ROLES, WAREHOUSE_ROLES, require_roles
+from app.api.deps import (
+    ADMIN_ROLES,
+    BACK_OFFICE_ROLES,
+    WAREHOUSE_ROLES,
+    require_capability,
+    require_roles,
+)
+from app.core.privileges import Capability
 from app.core.security import hash_password
 from app.db.session import get_db
 from app.models.consignee import Consignee
@@ -43,8 +50,12 @@ from app.schemas.base import ORMModel
 router = APIRouter(prefix="/api", tags=["masters"])
 
 ReadDep = Depends(require_roles(*BACK_OFFICE_ROLES))
+# The commercial terms: vendors, rate cards, goods categories.
 WriteDep = Depends(require_roles(*ADMIN_ROLES))
 OpsDep = Depends(require_roles(*WAREHOUSE_ROLES))
+# Customers, drivers, vehicles and crew. The warehouse runs on these and
+# could not add any of them, so the real list lived in a notebook.
+FleetDep = Depends(require_capability(Capability.FLEET))
 
 
 def _get_or_404(db: Session, model, obj_id, label: str):
@@ -219,6 +230,9 @@ class ConsigneeIn(BaseModel):
     type: ConsigneeType = ConsigneeType.RETAIL_CUSTOMER
     phone: str | None = None
     alternate_phone: str | None = None
+    # Who to ask for at the gate. A shop has a manager and a household does
+    # not, so it is optional and it matters most on a distributor.
+    contact_person: str | None = None
     address: str | None = None
     city: str | None = None
     district: str | None = None
@@ -234,6 +248,10 @@ class ConsigneeOut(ConsigneeIn, ORMModel):
     id: str
     geo_confidence: GeoConfidence
     is_active: bool
+    # Whether this record is still a name and a town, and whether the
+    # customer has been asked to finish it themselves.
+    details_requested_at: datetime | None = None
+    details_completed_at: datetime | None = None
 
 
 @router.get("/consignees", response_model=list[ConsigneeOut])
@@ -259,7 +277,7 @@ def list_consignees(
 
 
 @router.post("/consignees", response_model=ConsigneeOut, status_code=201)
-def create_consignee(payload: ConsigneeIn, db: Session = Depends(get_db), _=OpsDep):
+def create_consignee(payload: ConsigneeIn, db: Session = Depends(get_db), _=FleetDep):
     data = payload.model_dump()
     # A pin typed in by an admin is better than nothing but has not been
     # confirmed on the ground; the customer's own correction upgrades it.
@@ -298,7 +316,7 @@ def list_vehicle_types(
 
 
 @router.post("/vehicle-types", response_model=VehicleTypeOut, status_code=201)
-def create_vehicle_type(payload: VehicleTypeIn, db: Session = Depends(get_db), _=WriteDep):
+def create_vehicle_type(payload: VehicleTypeIn, db: Session = Depends(get_db), _=FleetDep):
     return VehicleTypeOut.model_validate(_save(db, VehicleType(**payload.model_dump())))
 
 
@@ -333,7 +351,9 @@ def list_vehicle_owners(
 
 
 @router.post("/vehicle-owners", response_model=VehicleOwnerOut, status_code=201)
-def create_vehicle_owner(payload: VehicleOwnerIn, db: Session = Depends(get_db), _=WriteDep):
+def create_vehicle_owner(
+    payload: VehicleOwnerIn, db: Session = Depends(get_db), _=FleetDep
+):
     return VehicleOwnerOut.model_validate(_save(db, VehicleOwner(**payload.model_dump())))
 
 
@@ -393,7 +413,7 @@ def list_vehicles(
 
 
 @router.post("/vehicles", response_model=VehicleOut, status_code=201)
-def create_vehicle(payload: VehicleIn, db: Session = Depends(get_db), _=WriteDep):
+def create_vehicle(payload: VehicleIn, db: Session = Depends(get_db), _=FleetDep):
     existing = db.execute(
         select(Vehicle).where(Vehicle.registration_no == payload.registration_no)
     ).scalar_one_or_none()
@@ -487,7 +507,7 @@ def list_drivers(
 
 
 @router.post("/drivers", response_model=DriverOut, status_code=201)
-def create_driver(payload: DriverIn, db: Session = Depends(get_db), _=WriteDep):
+def create_driver(payload: DriverIn, db: Session = Depends(get_db), _=FleetDep):
     if db.execute(select(Driver).where(Driver.phone == payload.phone)).scalar_one_or_none():
         raise HTTPException(status_code=409, detail="A driver with this phone already exists")
 
@@ -568,7 +588,7 @@ def list_labour(
 
 
 @router.post("/labour", response_model=LabourOut, status_code=201)
-def create_labour(payload: LabourIn, db: Session = Depends(get_db), _=OpsDep):
+def create_labour(payload: LabourIn, db: Session = Depends(get_db), _=FleetDep):
     return LabourOut.model_validate(_save(db, Labour(**payload.model_dump())))
 
 

@@ -42,21 +42,66 @@ def test_every_built_in_role_is_described():
     [
         (
             UserRole.SUPER_ADMIN,
-            {Capability.OFFICE_VIEW, Capability.OPERATIONS, Capability.MONEY, Capability.ADMIN},
+            {
+                Capability.OFFICE_VIEW,
+                Capability.OPERATIONS,
+                Capability.FLEET,
+                Capability.ADVANCES,
+                Capability.MONEY,
+                Capability.REPORTS,
+                Capability.ADMIN,
+            },
         ),
         (
             UserRole.OPS_ADMIN,
-            {Capability.OFFICE_VIEW, Capability.OPERATIONS, Capability.ADMIN},
+            {
+                Capability.OFFICE_VIEW,
+                Capability.OPERATIONS,
+                Capability.FLEET,
+                Capability.ADVANCES,
+                Capability.REPORTS,
+                Capability.ADMIN,
+            },
         ),
-        (UserRole.WAREHOUSE_ADMIN, {Capability.OFFICE_VIEW, Capability.OPERATIONS}),
-        (UserRole.ACCOUNTS, {Capability.OFFICE_VIEW, Capability.MONEY}),
-        (UserRole.STAKEHOLDER, {Capability.OFFICE_VIEW}),
+        (
+            UserRole.WAREHOUSE_ADMIN,
+            {
+                Capability.OFFICE_VIEW,
+                Capability.OPERATIONS,
+                Capability.FLEET,
+                Capability.ADVANCES,
+            },
+        ),
+        (
+            UserRole.ACCOUNTS,
+            {
+                Capability.OFFICE_VIEW,
+                Capability.ADVANCES,
+                Capability.MONEY,
+                Capability.REPORTS,
+            },
+        ),
+        (UserRole.STAKEHOLDER, {Capability.OFFICE_VIEW, Capability.REPORTS}),
         (UserRole.DRIVER, {Capability.DRIVE}),
     ],
 )
-def test_the_translation_matches_the_old_groupings(role, expected):
-    """Written out by hand against the groupings the guards used before:
-    ADMIN_ROLES, WAREHOUSE_ROLES, ACCOUNTS_ROLES, BACK_OFFICE_ROLES."""
+def test_each_role_holds_what_it_is_meant_to(role, expected):
+    """Written out by hand, because a mapping derived from the code it guards
+    proves nothing.
+
+    This began as a faithful translation of the role groupings the guards used
+    before roles were configurable — ADMIN_ROLES, WAREHOUSE_ROLES and the
+    rest. Two of those groupings turned out to be wrong about the warehouse:
+
+      * customers, drivers and vehicles sat behind ADMIN beside the rate
+        cards, so a warehouse admin could not add the dealer his own freight
+        was going to;
+      * Reports needed only `office.view`, which every office role has, so he
+        could read the company's revenue and margin.
+
+    FLEET and REPORTS split those apart, and ADVANCES was pulled out of MONEY
+    because the driver asking for diesel money is standing at his counter.
+    """
     assert capabilities_for_role(role) == expected
 
 
@@ -275,10 +320,11 @@ def test_an_unused_role_can_be_deleted(client, auth):
 
 
 def test_a_custom_role_decides_what_the_rail_shows(client, auth):
+    from sqlalchemy import select
+
     from app.core.security import create_access_token
     from app.db.session import SessionLocal
     from app.models.user import User
-    from sqlalchemy import select
 
     role = client.post("/api/roles", json=BRANCH, headers=auth).json()
     _second_user_on(role["id"])
@@ -298,10 +344,11 @@ def test_a_custom_role_decides_what_the_rail_shows(client, auth):
 
 def test_a_custom_role_loses_what_it_was_not_given(client, auth):
     """The point of the feature: the role decides, not the enum."""
+    from sqlalchemy import select
+
     from app.core.security import create_access_token
     from app.db.session import SessionLocal
     from app.models.user import User
-    from sqlalchemy import select
 
     role = client.post("/api/roles", json=BRANCH, headers=auth).json()
     _second_user_on(role["id"])

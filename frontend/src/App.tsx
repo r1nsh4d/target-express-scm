@@ -23,6 +23,7 @@ import RoutePresetsPage from '@/pages/RoutePresetsPage'
 import SettlementsPage from '@/pages/SettlementsPage'
 import TrackFindPage from '@/pages/TrackFindPage'
 import TrackPage from '@/pages/TrackPage'
+import MyDetailsPage from '@/pages/MyDetailsPage'
 import EnquiriesPage from '@/pages/EnquiriesPage'
 import UsersPage from '@/pages/UsersPage'
 import LandingPage from '@/pages/LandingPage'
@@ -83,6 +84,9 @@ export default function App() {
           the token itself is the credential. */}
       <Route path="/track" element={<TrackFindPage />} />
       <Route path="/track/:token" element={<TrackPage />} />
+      {/* No login. The token in the link is the whole credential, and it
+          reaches exactly one customer record. */}
+      <Route path="/my-details/:token" element={<MyDetailsPage />} />
 
       <Route
         path="/driver"
@@ -100,7 +104,7 @@ export default function App() {
           </Protected>
         }
       >
-        <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="dashboard" element={<HubShell to="/dashboard"><DashboardPage /></HubShell>} />
         <Route path="guide" element={<GuidePage />} />
         <Route path="categories" element={<CategoriesPage />} />
         <Route path="freights" element={<HubShell to="/freights"><TripsPage /></HubShell>} />

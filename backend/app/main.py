@@ -8,6 +8,7 @@ from app.api.routes import (
     chargesheets,
     company,
     consignments,
+    customerlink,
     dashboard,
     daysheet,
     driver,
@@ -50,6 +51,7 @@ app.include_router(driver.router)
 app.include_router(advances.router)
 app.include_router(masters.router)
 app.include_router(masters_edit.router)
+app.include_router(customerlink.router)
 app.include_router(profiles.router)
 app.include_router(presets.router)
 # Registered after masters so /api/freights/{id}/account from advances keeps

@@ -254,9 +254,20 @@ def parse(payload: ParseIn, db: Session = Depends(get_db), _=OpsDep) -> ParseOut
 # --------------------------------------------------------------------------- #
 
 class NewCustomerIn(BaseModel):
+    """Three things, because three is what the warehouse has.
+
+    A name, a mobile and a town. The door, the landmark, the floor and the
+    pin come later — from the office, or from the customer themselves on a
+    link sent to that mobile. Asking for all of it at the moment a morning's
+    bills are being typed is how a day sheet stops being used.
+    """
+
     name: str = Field(min_length=2, max_length=200)
     city: str | None = None
     phone: str | None = None
+    # A distributor has a purchase manager; a household does not.
+    contact_person: str | None = None
+    type: ConsigneeType = ConsigneeType.RETAIL_CUSTOMER
     # Where the lorry actually goes.
     #
     # A customer created here used to arrive with a name and nothing else, so
@@ -411,7 +422,8 @@ def commit(payload: CommitIn, db: Session = Depends(get_db), user: User = OpsDep
         else:
             consignee = Consignee(
                 name=row.new_customer.name.strip(),
-                type=ConsigneeType.RETAIL_CUSTOMER,
+                type=row.new_customer.type,
+                contact_person=(row.new_customer.contact_person or "").strip() or None,
                 city=(row.new_customer.city or "").strip() or None,
                 address=(row.new_customer.address or "").strip() or None,
                 phone=(row.new_customer.phone or "").strip() or None,

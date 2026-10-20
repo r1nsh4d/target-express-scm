@@ -1,5 +1,6 @@
 import {
   Banknote,
+  BookOpen,
   BarChart3,
   Bookmark,
   Building2,
@@ -65,7 +66,17 @@ export const HUBS: Hub[] = [
     label: 'Dashboard',
     blurb: 'What is waiting, and how the month is going',
     icon: LayoutDashboard,
-    children: [],
+    children: [
+      // Here rather than under Users, which is where it used to live. The
+      // guide needs nothing but a login, and hanging it off an admin-only
+      // hub put "Users" in the rail for people who cannot open it.
+      {
+        to: '/guide',
+        label: 'User guide',
+        blurb: 'The full cycle, in the order it has to be done',
+        icon: BookOpen,
+      },
+    ],
   },
   {
     // Second, not fourth as listed. It is the day's work and everything else
@@ -238,15 +249,23 @@ export const HUBS: Hub[] = [
         icon: MessageSquare,
         count: 'enquiries',
       },
-      {
-        to: '/guide',
-        label: 'User guide',
-        blurb: 'The full cycle, in the order it has to be done',
-        icon: Package,
-      },
     ],
   },
 ]
+
+/** The screen key the server knows a route by.
+ *
+ *  They are the same word everywhere but one: the saved-routes screen is
+ *  `presets` in the capability table and `/route-presets` in the router, and
+ *  a rename either side would orphan the `role_screens` rows already saved
+ *  against existing roles. So the one exception is written down rather than
+ *  papered over. */
+const SCREEN_KEY: Record<string, string> = { 'route-presets': 'presets' }
+
+export function screenKey(path: string): string {
+  const segment = path.replace(/^\//, '').split('/')[0]
+  return SCREEN_KEY[segment] ?? segment
+}
 
 /** The hub a path belongs to, for highlighting the rail. */
 export function hubFor(pathname: string): Hub | undefined {

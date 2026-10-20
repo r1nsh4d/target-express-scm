@@ -71,6 +71,10 @@ interface Override {
      never happens, so it is asked for here, on the line where the name is
      typed. */
   newCustomerWhere?: string
+  /* The mobile. Not a nicety: it is where the tracking link goes, and where
+     the "fill in your own address" link goes, so a customer created without
+     one is a customer nobody can finish the record of. */
+  newCustomerPhone?: string
   box_count?: number
   /* What is on the bill, by article code. Only used where the vendor prices
      unloading per article — six boxes says nothing about whether they are
@@ -251,6 +255,7 @@ export default function DaySheetPage() {
                 : {
                     name: r.o.newCustomerName ?? r.line.customer_text,
                     city: r.o.newCustomerWhere?.trim() || null,
+                    phone: r.o.newCustomerPhone?.trim() || null,
                   },
             }
           }),
@@ -684,14 +689,25 @@ function LineRow({
                 navigate to. Asked here because "add it later under Customers"
                 is the step that never happens. */}
             <Input
-              className="w-[9rem] shrink-0"
+              className="w-[8rem] shrink-0"
               value={row.o.newCustomerWhere ?? ''}
               placeholder="Town or area"
               onChange={(e) => onSet({ newCustomerWhere: e.target.value })}
               aria-label="Where this customer is"
             />
+            {/* And the mobile. It is where the tracking link goes and where
+                the "fill in your own address" link goes, so a customer
+                created without one is one nobody can finish. */}
+            <Input
+              className="tnum w-[8rem] shrink-0"
+              inputMode="tel"
+              value={row.o.newCustomerPhone ?? ''}
+              placeholder="Mobile"
+              onChange={(e) => onSet({ newCustomerPhone: e.target.value })}
+              aria-label="Their mobile number"
+            />
             <Select
-              className="w-[9rem] shrink-0"
+              className="w-[8rem] shrink-0"
               value="__new__"
               onChange={(e) => onSet({ consignee_id: e.target.value })}
             >
@@ -818,7 +834,9 @@ function LineRow({
               Nobody on file matches “{line.customer_text}” — this will be created as a new
               customer.
               {row.o.newCustomerWhere?.trim()
-                ? ' The pin can be dropped on the trip screen.'
+                ? row.o.newCustomerPhone?.trim()
+                  ? ' You can send them a link afterwards to fill in their own address and pin.'
+                  : ' Add their mobile and you can ask them for their own address and pin.'
                 : ' Put the town in beside the name, or the trip has no destination and the driver has nothing to navigate to.'}
             </span>
           ) : null}

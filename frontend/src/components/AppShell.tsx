@@ -8,6 +8,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Search,
+  ShieldAlert,
   Sun,
   X,
 } from 'lucide-react'
@@ -23,7 +24,7 @@ import { api, apiErrorMessage } from '@/lib/api'
 import { ROLE_LABELS, useAuth } from '@/lib/auth'
 import type { NavItem } from '@/lib/nav'
 import { currentNav, navForAccess } from '@/lib/nav'
-import { HUBS, hubFor } from '@/lib/hubs'
+import { HUBS, hubFor, screenKey } from '@/lib/hubs'
 import { toggleTheme, useTheme } from '@/lib/theme'
 import { TEXT_SIZE_LABELS, setTextSize, useTextSize } from '@/lib/textsize'
 
@@ -214,12 +215,30 @@ function Rail({
           browser's own chrome taken off. overflow-y-auto is the safety net for
           anything shorter, not the normal case. */}
       <nav className={clsx('flex-1 overflow-y-auto py-2', collapsed ? 'px-2' : 'px-2.5')}>
-        {HUBS.filter((hub) => visible.some((i) => i.to === hub.to || hub.children.some((c) => c.to === i.to)))
-          .map((hub) => (
+        {/* A hub, and somewhere it can actually take you.
+
+            The rail showed a hub if ANY of its screens was allowed and then
+            linked to the hub's own landing page regardless — so a warehouse
+            admin saw "Users", because the user guide lives under it, and
+            clicking it reached a page the server refuses.
+
+            Now the link goes to the hub's own page where that is allowed and
+            to its first allowed tile where it is not: a warehouse admin has
+            no Vendors page but does have the Customers inside it, and losing
+            the whole group over the heading would cost him the one screen he
+            uses most. A hub with nothing open is simply not drawn. */}
+        {HUBS.map((hub) => ({
+          hub,
+          entry: visible.some((i) => i.to === hub.to)
+            ? hub.to
+            : (hub.children.find((c) => visible.some((i) => i.to === c.to))?.to ?? null),
+        }))
+          .filter((row) => row.entry !== null)
+          .map(({ hub, entry }) => (
             <RailLink
               key={hub.to}
               item={{
-                to: hub.to,
+                to: entry!,
                 label: hub.label,
                 blurb: hub.blurb,
                 icon: <hub.icon className="size-4 shrink-0" />,
@@ -607,11 +626,73 @@ export default function AppShell() {
           key={location.pathname}
           className="tx-in mx-auto w-full min-w-0 max-w-[1280px] px-4 pt-2 pb-10 sm:px-6 lg:px-8"
         >
-          <Outlet />
+          <ScreenGate pathname={location.pathname}>
+            <Outlet />
+          </ScreenGate>
         </main>
       </div>
 
       <CommandPalette />
+    </div>
+  )
+}
+
+/* One place that says "not for your role", instead of every screen finding
+ * out for itself.
+ *
+ * Roles was reachable by a warehouse admin — it had no entry in the screen
+ * table, so nothing filtered it out of the rail — and the page it opened sat
+ * on a spinner forever, because its own check was `isLoading || !data` and
+ * the data never came: the API had refused it. A permanent spinner is the
+ * worst way to say no. It looks like the application is broken rather than
+ * like the person is not allowed, and it is reported as a bug every time.
+ *
+ * Keyed off the first path segment, which is how the screen table is keyed,
+ * so a screen added to the router without a line in that table is refused
+ * rather than silently open to everybody.
+ */
+function ScreenGate({
+  pathname,
+  children,
+}: {
+  pathname: string
+  children: React.ReactNode
+}) {
+  const navigate = useNavigate()
+  // The same cached query the rail reads, so this costs no extra request.
+  const access = useQuery({
+    queryKey: ['/me/access'],
+    queryFn: async () => (await api.get<{ screens: string[] }>('/me/access')).data,
+    staleTime: 5 * 60_000,
+  })
+  const screens = access.data?.screens
+
+  // Until the access list arrives, show the page. It will be refused by the
+  // server anyway if it should be, and flashing a refusal at everybody for
+  // the first 200ms of every session is worse than the rare wrong frame.
+  if (!screens) return <>{children}</>
+
+  const key = screenKey(pathname)
+  if (!key || screens.includes(key)) return <>{children}</>
+
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="max-w-sm text-center">
+        <span
+          className="mx-auto grid size-12 place-items-center rounded-full"
+          style={{ background: 'var(--bg-elevated)', color: 'var(--text-faint)' }}
+        >
+          <ShieldAlert className="size-6" />
+        </span>
+        <h2 className="mt-4 text-[16px] font-semibold">Not part of your role</h2>
+        <p className="mt-1.5 text-[13px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+          This screen is not one your login can reach. If you need it, ask whoever set up your
+          account — it is a tick box on your role, not a password.
+        </p>
+        <Button className="mt-5" variant="secondary" onClick={() => navigate('/dashboard')}>
+          Back to the dashboard
+        </Button>
+      </div>
     </div>
   )
 }

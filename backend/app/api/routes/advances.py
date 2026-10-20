@@ -6,7 +6,8 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import ACCOUNTS_ROLES, BACK_OFFICE_ROLES, WAREHOUSE_ROLES, require_roles
+from app.api.deps import BACK_OFFICE_ROLES, require_capability, require_roles
+from app.core.privileges import Capability
 from app.db.session import get_db
 from app.models.enums import AdvanceStatus, PayeeType
 from app.models.freight import Freight
@@ -94,7 +95,10 @@ def _to_out(advance: Advance) -> AdvanceOut:
 def create_advance(
     payload: AdvanceIn,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*WAREHOUSE_ROLES, *ACCOUNTS_ROLES)),
+    # Handing cash to a driver is a warehouse act — he is standing at the
+    # counter asking for diesel money — so it is its own capability rather
+    # than part of invoicing a vendor.
+    user: User = Depends(require_capability(Capability.ADVANCES)),
 ) -> AdvanceOut:
     if payload.freight_id and db.get(Freight, payload.freight_id) is None:
         raise HTTPException(status_code=404, detail="Trip not found")

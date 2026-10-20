@@ -1,4 +1,5 @@
-import { Plus, Search, Users } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
+import { Plus, Search, Send, Users } from 'lucide-react'
 import { Suspense, lazy, useCallback, useState } from 'react'
 
 import {
@@ -17,7 +18,7 @@ import {
 } from '@/components/ui'
 import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
 import { RowActions } from '@/components/RowActions'
-import { apiErrorMessage } from '@/lib/api'
+import { api, apiErrorMessage } from '@/lib/api'
 import type { Consignee } from '@/lib/resources'
 import { useCreate, useList } from '@/lib/resources'
 import { useOpenOnNewParam } from '@/lib/motion'
@@ -107,6 +108,11 @@ export default function CustomersPage() {
                         hint: 'Their tracking link is sent here',
                       },
                       { name: 'alternate_phone', label: 'Alternate phone', kind: 'tel' as const },
+                      {
+                        name: 'contact_person',
+                        label: 'Who to ask for',
+                        hint: 'The manager at a shop, the purchase contact at a distributor',
+                      },
                       { name: 'city', label: 'City' },
                       { name: 'pincode', label: 'Pincode' },
                       { name: 'address', label: 'Address', kind: 'textarea' as const },
@@ -142,12 +148,114 @@ export default function CustomersPage() {
                   }
                 />
               </Facts>
+
+              {/* The gap worth closing, and the one way to close it that does
+                  not involve somebody guessing. A record entered during a
+                  morning's bills is a name and a town; the door and the pin
+                  belong to the customer, so they are asked. */}
+              {!c.address || c.geo_confidence !== 'VERIFIED' ? (
+                <AskCustomer customer={c} />
+              ) : null}
             </>
           )}
         />
       )}
 
       <CustomerForm open={open} onClose={() => setOpen(false)} />
+    </div>
+  )
+}
+
+/* Ask the customer to finish their own record.
+ *
+ * A record entered while a morning's bills were being typed is a name, a
+ * mobile and a town — which is what the warehouse has and all it has time
+ * for. The door, the landmark and the pin belong to the person who lives
+ * there, and asking them is both faster and more accurate than guessing.
+ *
+ * The message comes back ready to send, because somebody doing this forty
+ * times in a morning should not be composing a sentence each time. Until the
+ * WhatsApp number is configured it is copied and pasted by hand: a worse
+ * experience and a working one, which is the right order to build them in.
+ */
+function AskCustomer({ customer }: { customer: Consignee }) {
+  const [link, setLink] = useState<{ url: string; whatsapp_text: string } | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const ask = useMutation({
+    mutationFn: async () =>
+      (
+        await api.post<{ url: string; whatsapp_text: string }>(
+          `/consignees/${customer.id}/details-link`,
+        )
+      ).data,
+    onSuccess: setLink,
+    onError: (e) => setError(apiErrorMessage(e)),
+  })
+
+  if (link) {
+    return (
+      <div
+        className="mt-3 rounded-[11px] px-3 py-2.5"
+        style={{ background: 'var(--accent-dim)' }}
+      >
+        <p className="text-[12px] leading-relaxed">
+          Send this to {customer.phone ?? 'them'} and they can fill in their own address and
+          drop a pin.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            onClick={() => {
+              navigator.clipboard
+                ?.writeText(link.whatsapp_text)
+                .then(() => {
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 2000)
+                })
+                .catch(() => setError('Could not copy — select the link and copy it by hand'))
+            }}
+          >
+            {copied ? 'Copied' : 'Copy the message'}
+          </Button>
+          {customer.phone ? (
+            <a
+              href={`https://wa.me/91${customer.phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(link.whatsapp_text)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="no-underline"
+            >
+              <Button size="sm" variant="secondary">
+                Open WhatsApp
+              </Button>
+            </a>
+          ) : null}
+        </div>
+        <p className="mt-2 break-all text-[11px]" style={{ color: 'var(--text-faint)' }}>
+          {link.url}
+        </p>
+        <ErrorNote>{error}</ErrorNote>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => {
+          setError(null)
+          ask.mutate()
+        }}
+        disabled={ask.isPending}
+        className="inline-flex items-center gap-1.5 text-[12px] underline underline-offset-2"
+        style={{ color: 'var(--accent)' }}
+      >
+        <Send className="size-3.5" />
+        {ask.isPending ? 'Making a link…' : 'Ask them for their address'}
+      </button>
+      <ErrorNote>{error}</ErrorNote>
     </div>
   )
 }

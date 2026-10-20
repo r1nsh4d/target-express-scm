@@ -33,13 +33,31 @@ from app.models.enums import UserRole
 class Capability:
     """What the server actually checks. One per distinct route guard."""
 
-    # Read the office screens: freights, bills, labels, reports.
+    # Read the day's work: freights, bills, labels, the dashboard.
     OFFICE_VIEW = "office.view"
-    # Create and change the day's work: bills, freights, loading, dispatch.
+    # Create and change it: bills, freights, loading, dispatch, returns.
     OPERATIONS = "operations.manage"
-    # Invoices, settlements, advances, expenses, money in.
+    # Customers, drivers, vehicles and the loading crew.
+    #
+    # Split out of ADMIN, because the warehouse runs on these. A warehouse
+    # admin building tomorrow's freights needs to add the dealer who rang this
+    # morning and the lorry that turned up; making him wait for somebody with
+    # the keys to the rate cards is how the real list ends up in a notebook.
+    # What he still cannot touch is what anything is CHARGED at.
+    FLEET = "fleet.manage"
+    # Hand cash to a driver before a settlement, and record its recovery.
+    #
+    # Its own capability rather than part of MONEY, because it is a warehouse
+    # act — the driver is standing at the counter asking for diesel money —
+    # while invoicing a vendor is not. Both still land in the same ledger.
+    ADVANCES = "advances.manage"
+    # Invoices, settlements, expenses, money in.
     MONEY = "money.manage"
-    # Vendors, rates, vehicles, drivers, customers, users, enquiries.
+    # What the business earned: revenue, margin, what each driver and lorry
+    # brought in. Separate from MONEY because reading the figures and moving
+    # them are different jobs — an owner reads, an accounts clerk moves.
+    REPORTS = "reports.view"
+    # Vendors, rate cards, users and roles. The commercial terms and the keys.
     ADMIN = "admin.manage"
     # The driver's own app. Never granted alongside the others — a person is
     # out on the road or in the office, and a login that is both is a login
@@ -48,39 +66,68 @@ class Capability:
 
 
 CAPABILITIES: dict[str, str] = {
-    Capability.OFFICE_VIEW: "See the office screens",
+    Capability.OFFICE_VIEW: "See the day's freights and bills",
     Capability.OPERATIONS: "Enter bills, build freights, dispatch",
-    Capability.MONEY: "Invoices, settlements, advances and expenses",
-    Capability.ADMIN: "Vendors, rates, vehicles, drivers and users",
+    Capability.FLEET: "Add and edit customers, drivers and vehicles",
+    Capability.ADVANCES: "Hand an advance to a driver",
+    Capability.MONEY: "Invoices, settlements, expenses and money in",
+    Capability.REPORTS: "See what the business earned",
+    Capability.ADMIN: "Vendors, rate cards, users and roles",
     Capability.DRIVE: "Use the driver app",
 }
 
 
-# Exactly what each built-in role could already reach, written out.
+# What each built-in role holds.
 #
-# Derived from the groupings the guards used before roles were configurable:
-#   ADMIN_ROLES       = SUPER_ADMIN, OPS_ADMIN
-#   WAREHOUSE_ROLES   = ADMIN_ROLES + WAREHOUSE_ADMIN
-#   ACCOUNTS_ROLES    = SUPER_ADMIN, ACCOUNTS
-#   BACK_OFFICE_ROLES = all five office roles
+# This began as a faithful translation of the role groupings the guards used
+# before roles were configurable. Two of those groupings turned out to be
+# wrong about the warehouse, and the warehouse is where the work happens:
 #
-# Nothing here grants anything new. If a test that passed before this file
-# fails after it, this table is wrong and not the test.
+#   A WAREHOUSE ADMIN COULD NOT ADD A CUSTOMER. Customers, drivers and
+#   vehicles all sat behind ADMIN alongside the rate cards. So the man
+#   building tomorrow's freights could enter the bills but not the dealer
+#   they were going to, and the real list drifted into a notebook. He has
+#   FLEET now. He still cannot see or set what anything is charged at.
+#
+#   A WAREHOUSE ADMIN COULD SEE THE REPORTS. Revenue, margin, what each
+#   driver earned — all of it, because Reports only needed office.view. The
+#   dashboard's earnings tiles the same way. Neither is his business, and
+#   both are now behind REPORTS.
+#
+# He can also hand out an advance, because the driver asking for diesel money
+# is standing at his counter.
 SYSTEM_ROLE_CAPABILITIES: dict[UserRole, set[str]] = {
     UserRole.SUPER_ADMIN: {
         Capability.OFFICE_VIEW,
         Capability.OPERATIONS,
+        Capability.FLEET,
+        Capability.ADVANCES,
         Capability.MONEY,
+        Capability.REPORTS,
         Capability.ADMIN,
     },
     UserRole.OPS_ADMIN: {
         Capability.OFFICE_VIEW,
         Capability.OPERATIONS,
+        Capability.FLEET,
+        Capability.ADVANCES,
+        Capability.REPORTS,
         Capability.ADMIN,
     },
-    UserRole.WAREHOUSE_ADMIN: {Capability.OFFICE_VIEW, Capability.OPERATIONS},
-    UserRole.ACCOUNTS: {Capability.OFFICE_VIEW, Capability.MONEY},
-    UserRole.STAKEHOLDER: {Capability.OFFICE_VIEW},
+    UserRole.WAREHOUSE_ADMIN: {
+        Capability.OFFICE_VIEW,
+        Capability.OPERATIONS,
+        Capability.FLEET,
+        Capability.ADVANCES,
+    },
+    UserRole.ACCOUNTS: {
+        Capability.OFFICE_VIEW,
+        Capability.ADVANCES,
+        Capability.MONEY,
+        Capability.REPORTS,
+    },
+    # Reads the figures, moves nothing.
+    UserRole.STAKEHOLDER: {Capability.OFFICE_VIEW, Capability.REPORTS},
     UserRole.DRIVER: {Capability.DRIVE},
 }
 
@@ -100,22 +147,25 @@ SCREENS: list[tuple[str, str, str]] = [
     ("labels", "Sorting & labels", Capability.OFFICE_VIEW),
     ("returns", "Returns", Capability.OPERATIONS),
     ("vendors", "Vendors", Capability.ADMIN),
-    ("consignees", "Customers", Capability.ADMIN),
-    ("vehicles", "Vehicles", Capability.ADMIN),
-    ("market-vehicles", "Market vehicles", Capability.ADMIN),
-    ("drivers", "Drivers", Capability.ADMIN),
-    ("labour", "Loading crew", Capability.ADMIN),
+    ("consignees", "Customers", Capability.FLEET),
+    ("vehicles", "Vehicles", Capability.FLEET),
+    ("market-vehicles", "Market vehicles", Capability.FLEET),
+    ("drivers", "Drivers", Capability.FLEET),
+    ("labour", "Loading crew", Capability.FLEET),
     ("categories", "Goods categories", Capability.ADMIN),
     ("rate-cards", "Rate cards", Capability.ADMIN),
     ("unloading-rates", "Unloading rates", Capability.ADMIN),
     ("invoices", "Vendor invoices", Capability.MONEY),
     ("money-in", "Money in", Capability.MONEY),
     ("settlements", "Settlements", Capability.MONEY),
-    ("advances", "Advances", Capability.MONEY),
-    ("reports", "Reports", Capability.OFFICE_VIEW),
+    ("advances", "Advances", Capability.ADVANCES),
+    ("reports", "Reports", Capability.REPORTS),
     ("expenses", "Expenses", Capability.MONEY),
     ("enquiries", "Enquiries", Capability.ADMIN),
     ("users", "Users", Capability.ADMIN),
+    # Missing until now, which is exactly why a warehouse admin could open
+    # Roles: nothing filtered a screen the table had never heard of.
+    ("roles", "Roles", Capability.ADMIN),
     ("guide", "User guide", Capability.OFFICE_VIEW),
 ]
 

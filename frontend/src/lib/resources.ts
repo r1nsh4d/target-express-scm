@@ -145,10 +145,18 @@ export interface Consignee {
   name: string
   type: 'RETAIL_CUSTOMER' | 'DISTRIBUTION_CENTER'
   phone: string | null
+  /* Who the driver asks for at the gate. A shop has a manager and a
+     household does not, so it is optional and matters most on a
+     distributor. */
+  contact_person: string | null
   address: string | null
   city: string | null
   geo_confidence: string
   is_active: boolean
+  /* Whether the customer has been asked to finish their own record, and
+     whether they did. */
+  details_requested_at: string | null
+  details_completed_at: string | null
 }
 
 export interface RateCard {

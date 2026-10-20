@@ -31,7 +31,8 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import BACK_OFFICE_ROLES, require_roles
+from app.api.deps import BACK_OFFICE_ROLES, require_capability, require_roles
+from app.core.privileges import Capability
 from app.db.session import get_db
 from app.models.billing import VendorInvoiceLine
 from app.models.enums import AdvanceStatus, PayeeType
@@ -223,7 +224,15 @@ class EconomicsOut(BaseModel):
 
 
 @router.get("/freights/{freight_id}/economics", response_model=EconomicsOut)
-def freight_money(freight_id: str, db: Session = Depends(get_db), _=ReadDep):
+def freight_money(
+    freight_id: str,
+    db: Session = Depends(get_db),
+    # What the vendor was charged and what the trip made. Not the warehouse's
+    # business — it builds freights, it does not price them — so this is
+    # behind the same capability as the reports rather than behind
+    # `office.view`, which everybody in the office has.
+    _=Depends(require_capability(Capability.REPORTS)),
+):
     """In, out, and what is left — for one trip.
 
     The office's view of the question the driver asks about his own pay. Both

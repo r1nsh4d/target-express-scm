@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 
 import { api } from '@/lib/api'
 import type { Hub as HubDef } from '@/lib/hubs'
+import { screenKey } from '@/lib/hubs'
 import { stagger } from '@/lib/motion'
 
 /* The way into one part of the business.
@@ -37,12 +38,25 @@ export function Hub({
     staleTime: 3 * 60_000,
   })
 
-  if (!hub.children.length) return <>{children}</>
+  /* Only the tiles this login can open.
+     A tile that leads to a refusal is worse than no tile: it reads as a
+     feature that is broken rather than one that is not yours. */
+  const access = useQuery({
+    queryKey: ['/me/access'],
+    queryFn: async () => (await api.get<{ screens: string[] }>('/me/access')).data,
+    staleTime: 5 * 60_000,
+  })
+  const allowed = access.data?.screens
+  const tiles = allowed
+    ? hub.children.filter((c) => allowed.includes(screenKey(c.to)))
+    : hub.children
+
+  if (!tiles.length) return <>{children}</>
 
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {hub.children.map((child, i) => {
+        {tiles.map((child, i) => {
           const Icon = child.icon
           const n = child.count ? counts.data?.[child.count] : undefined
 

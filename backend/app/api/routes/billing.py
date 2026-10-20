@@ -9,8 +9,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.api.deps import ACCOUNTS_ROLES, BACK_OFFICE_ROLES, require_roles
+from app.api.deps import require_any_capability, require_capability
 from app.api.routes.company import amount_in_words
+from app.core.privileges import Capability
 from app.db.session import get_db
 from app.models.billing import VendorInvoice
 from app.models.enums import (
@@ -31,8 +32,15 @@ from app.services.rating import money
 
 router = APIRouter(prefix="/api", tags=["billing"])
 
-ReadDep = Depends(require_roles(*BACK_OFFICE_ROLES))
-MoneyDep = Depends(require_roles(*ACCOUNTS_ROLES))
+# Reading an invoice or a settlement is still reading an amount.
+#
+# This was `office.view`, which every office role has — so the warehouse
+# admin, who builds freights and does not price them, could open every
+# invoice the company had raised. Two jobs legitimately read these for
+# different reasons: the clerk who raises them and the owner who wants to
+# know what went out. Either is enough; the warehouse is neither.
+ReadDep = Depends(require_any_capability(Capability.MONEY, Capability.REPORTS))
+MoneyDep = Depends(require_capability(Capability.MONEY))
 
 
 # --------------------------------------------------------------------------- #

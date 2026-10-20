@@ -37,7 +37,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import ADMIN_ROLES, WAREHOUSE_ROLES, require_roles
+from app.api.deps import ADMIN_ROLES, WAREHOUSE_ROLES, require_capability, require_roles
+from app.core.privileges import Capability
 from app.db.session import get_db
 from app.models.billing import VendorInvoiceLine
 from app.models.consignee import Consignee
@@ -56,8 +57,11 @@ from app.models.vendor import GoodsCategory, Vendor, VendorDivision, VendorWareh
 
 router = APIRouter(prefix="/api", tags=["masters"])
 
+# The commercial terms: vendors, divisions, warehouses, categories, rates.
 WriteDep = Depends(require_roles(*ADMIN_ROLES))
 OpsDep = Depends(require_roles(*WAREHOUSE_ROLES))
+# Customers, drivers, vehicles and crew — the warehouse's own list.
+FleetDep = Depends(require_capability(Capability.FLEET))
 
 
 def _load(db: Session, model, obj_id: uuid.UUID, label: str):
@@ -225,6 +229,7 @@ class ConsigneePatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     phone: str | None = Field(default=None, max_length=20)
     alternate_phone: str | None = Field(default=None, max_length=20)
+    contact_person: str | None = Field(default=None, max_length=160)
     address: str | None = None
     city: str | None = Field(default=None, max_length=120)
     district: str | None = Field(default=None, max_length=120)
@@ -239,7 +244,7 @@ class ConsigneePatch(BaseModel):
 
 @router.patch("/consignees/{item_id}")
 def update_consignee(
-    item_id: uuid.UUID, payload: ConsigneePatch, db: Session = Depends(get_db), _=OpsDep
+    item_id: uuid.UUID, payload: ConsigneePatch, db: Session = Depends(get_db), _=FleetDep
 ):
     """Correcting a customer fixes them for every FUTURE delivery.
 
@@ -254,12 +259,12 @@ def update_consignee(
 
 
 @router.delete("/consignees/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-def retire_consignee(item_id: uuid.UUID, db: Session = Depends(get_db), _=OpsDep):
+def retire_consignee(item_id: uuid.UUID, db: Session = Depends(get_db), _=FleetDep):
     _retire(db, Consignee, item_id, "Customer")
 
 
 @router.post("/consignees/{item_id}/restore")
-def restore_consignee(item_id: uuid.UUID, db: Session = Depends(get_db), _=OpsDep):
+def restore_consignee(item_id: uuid.UUID, db: Session = Depends(get_db), _=FleetDep):
     obj = _restore(db, Consignee, item_id, "Customer")
     return {"id": str(obj.id), "is_active": obj.is_active}
 
@@ -277,7 +282,7 @@ class VehicleTypePatch(BaseModel):
 
 @router.patch("/vehicle-types/{item_id}")
 def update_vehicle_type(
-    item_id: uuid.UUID, payload: VehicleTypePatch, db: Session = Depends(get_db), _=WriteDep
+    item_id: uuid.UUID, payload: VehicleTypePatch, db: Session = Depends(get_db), _=FleetDep
 ):
     obj = _load(db, VehicleType, item_id, "Vehicle type")
     _apply(obj, payload)
@@ -287,7 +292,7 @@ def update_vehicle_type(
 
 
 @router.delete("/vehicle-types/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-def retire_vehicle_type(item_id: uuid.UUID, db: Session = Depends(get_db), _=WriteDep):
+def retire_vehicle_type(item_id: uuid.UUID, db: Session = Depends(get_db), _=FleetDep):
     _retire(db, VehicleType, item_id, "Vehicle type")
 
 
@@ -306,7 +311,7 @@ class VehicleOwnerPatch(BaseModel):
 
 @router.patch("/vehicle-owners/{item_id}")
 def update_vehicle_owner(
-    item_id: uuid.UUID, payload: VehicleOwnerPatch, db: Session = Depends(get_db), _=WriteDep
+    item_id: uuid.UUID, payload: VehicleOwnerPatch, db: Session = Depends(get_db), _=FleetDep
 ):
     obj = _load(db, VehicleOwner, item_id, "Vehicle owner")
     _apply(obj, payload)
@@ -316,7 +321,7 @@ def update_vehicle_owner(
 
 
 @router.delete("/vehicle-owners/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-def retire_vehicle_owner(item_id: uuid.UUID, db: Session = Depends(get_db), _=WriteDep):
+def retire_vehicle_owner(item_id: uuid.UUID, db: Session = Depends(get_db), _=FleetDep):
     _retire(db, VehicleOwner, item_id, "Vehicle owner")
 
 
@@ -331,7 +336,7 @@ class VehiclePatch(BaseModel):
 
 @router.patch("/vehicles/{item_id}")
 def update_vehicle(
-    item_id: uuid.UUID, payload: VehiclePatch, db: Session = Depends(get_db), _=WriteDep
+    item_id: uuid.UUID, payload: VehiclePatch, db: Session = Depends(get_db), _=FleetDep
 ):
     """Ownership, the odometer and the LR counter are deliberately absent.
 
@@ -355,7 +360,7 @@ def update_vehicle(
 
 
 @router.delete("/vehicles/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-def retire_vehicle(item_id: uuid.UUID, db: Session = Depends(get_db), _=WriteDep):
+def retire_vehicle(item_id: uuid.UUID, db: Session = Depends(get_db), _=FleetDep):
     """Retired, never deleted. Its odometer readings are part of the chain that
     proves the kilometres on invoices already sent."""
     _retire(db, Vehicle, item_id, "Vehicle")
@@ -371,7 +376,7 @@ class DriverPatch(BaseModel):
 
 @router.patch("/drivers/{item_id}")
 def update_driver(
-    item_id: uuid.UUID, payload: DriverPatch, db: Session = Depends(get_db), _=WriteDep
+    item_id: uuid.UUID, payload: DriverPatch, db: Session = Depends(get_db), _=FleetDep
 ):
     obj = _load(db, Driver, item_id, "Driver")
     data = payload.model_dump(exclude_unset=True)
@@ -411,7 +416,7 @@ def update_driver(
 
 
 @router.delete("/drivers/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-def retire_driver(item_id: uuid.UUID, db: Session = Depends(get_db), _=WriteDep):
+def retire_driver(item_id: uuid.UUID, db: Session = Depends(get_db), _=FleetDep):
     """Retiring a driver also disables his login, which is the thing someone
     actually means when they say a driver has left."""
     driver = _load(db, Driver, item_id, "Driver")
@@ -433,7 +438,7 @@ class LabourPatch(BaseModel):
 
 @router.patch("/labour/{item_id}")
 def update_labour(
-    item_id: uuid.UUID, payload: LabourPatch, db: Session = Depends(get_db), _=OpsDep
+    item_id: uuid.UUID, payload: LabourPatch, db: Session = Depends(get_db), _=FleetDep
 ):
     obj = _load(db, Labour, item_id, "Loading crew member")
     _apply(obj, payload)
@@ -443,7 +448,7 @@ def update_labour(
 
 
 @router.delete("/labour/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-def retire_labour(item_id: uuid.UUID, db: Session = Depends(get_db), _=OpsDep):
+def retire_labour(item_id: uuid.UUID, db: Session = Depends(get_db), _=FleetDep):
     _retire(db, Labour, item_id, "Loading crew member")
 
 
@@ -618,7 +623,7 @@ class UsageOut(BaseModel):
 
 
 @router.get("/consignees/{item_id}/usage", response_model=UsageOut)
-def consignee_usage(item_id: uuid.UUID, db: Session = Depends(get_db), _=OpsDep):
+def consignee_usage(item_id: uuid.UUID, db: Session = Depends(get_db), _=FleetDep):
     points = _in_use(db, FreightPoint.consignee_id, item_id)
     consignments = _in_use(db, Consignment.consignee_id, item_id)
     total = points + consignments
@@ -636,7 +641,7 @@ def consignee_usage(item_id: uuid.UUID, db: Session = Depends(get_db), _=OpsDep)
 
 
 @router.get("/vehicles/{item_id}/usage", response_model=UsageOut)
-def vehicle_usage(item_id: uuid.UUID, db: Session = Depends(get_db), _=WriteDep):
+def vehicle_usage(item_id: uuid.UUID, db: Session = Depends(get_db), _=FleetDep):
     legs = _in_use(db, FreightLeg.vehicle_id, item_id)
     return UsageOut(
         in_use=legs > 0,
@@ -651,7 +656,7 @@ def vehicle_usage(item_id: uuid.UUID, db: Session = Depends(get_db), _=WriteDep)
 
 
 @router.get("/drivers/{item_id}/usage", response_model=UsageOut)
-def driver_usage(item_id: uuid.UUID, db: Session = Depends(get_db), _=WriteDep):
+def driver_usage(item_id: uuid.UUID, db: Session = Depends(get_db), _=FleetDep):
     legs = _in_use(db, FreightLeg.driver_id, item_id)
     return UsageOut(
         in_use=legs > 0,

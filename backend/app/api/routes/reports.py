@@ -32,9 +32,10 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.api.deps import BACK_OFFICE_ROLES, require_roles
+from app.api.deps import require_capability
+from app.core.privileges import Capability
 from app.db.session import get_db
-from app.models.billing import VendorInvoice, VendorInvoiceLine
+from app.models.billing import VendorInvoice
 from app.models.consignment import Box, Consignment
 from app.models.enums import (
     ApprovalStatus,
@@ -49,7 +50,10 @@ from app.services.rating import money
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
-ReadDep = Depends(require_roles(*BACK_OFFICE_ROLES))
+# Revenue, margin, what each driver and lorry brought in. This sat behind
+# `office.view`, which every office role has — so the warehouse admin
+# building tomorrow's freights could read the company's earnings.
+ReadDep = Depends(require_capability(Capability.REPORTS))
 
 
 class MoneyBlock(BaseModel):

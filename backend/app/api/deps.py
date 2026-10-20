@@ -5,9 +5,9 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
+from app.core.privileges import capabilities_for_role
 from app.core.security import decode_access_token
 from app.db.session import get_db
-from app.core.privileges import capabilities_for_role
 from app.models.enums import UserRole
 from app.models.user import User
 
@@ -112,13 +112,36 @@ def require_capability(*capabilities: str) -> Callable[[User], User]:
     """Guard written directly in capabilities, for anything new.
 
     Preferred over require_roles from here on: it says what the endpoint needs
-    rather than who happens to have it today.
+    rather than who happens to have it today. Every capability named is
+    required.
     """
 
     wanted = set(capabilities)
 
     def dependency(user: User = Depends(get_current_user)) -> User:
         if wanted <= capabilities_of(user):
+            return user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action is not available for your role",
+        )
+
+    return dependency
+
+
+def require_any_capability(*capabilities: str) -> Callable[[User], User]:
+    """Any one of these is enough.
+
+    For screens two different jobs reach for different reasons. An invoice is
+    read by the accounts clerk who raises it and by the owner who wants to
+    know what went out; requiring both capabilities would shut out each of
+    them, and requiring neither leaves it open to the warehouse.
+    """
+
+    wanted = set(capabilities)
+
+    def dependency(user: User = Depends(get_current_user)) -> User:
+        if wanted & capabilities_of(user):
             return user
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
