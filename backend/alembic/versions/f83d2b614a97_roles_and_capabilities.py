@@ -18,6 +18,7 @@ Create Date: 2026-10-15
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "f83d2b614a97"
@@ -27,6 +28,11 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # server_default, not just nullable=False. SQLAlchemy leaves these
+    # out of an INSERT and lets the database fill them, so a NOT NULL
+    # column with no DEFAULT refuses every row. Added after four tables
+    # shipped without it; `e2b94c71d3a8` repairs databases already built
+    # from this file, and this fixes the ones built from it next.
     op.create_table(
         "roles",
         sa.Column("id", sa.UUID(), nullable=False),
@@ -35,8 +41,18 @@ def upgrade() -> None:
         sa.Column("is_system", sa.Boolean(), server_default="false", nullable=False),
         sa.Column("base_role", sa.String(length=24), nullable=True),
         sa.Column("is_active", sa.Boolean(), server_default="true", nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("name", name="uq_role_name"),
     )
@@ -46,8 +62,18 @@ def upgrade() -> None:
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("role_id", sa.UUID(), nullable=False),
         sa.Column("capability", sa.String(length=48), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["role_id"], ["roles.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         # Granting the same thing twice is not a different grant.
@@ -62,8 +88,18 @@ def upgrade() -> None:
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("role_id", sa.UUID(), nullable=False),
         sa.Column("screen", sa.String(length=48), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["role_id"], ["roles.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("role_id", "screen", name="uq_role_screen"),

@@ -19,8 +19,10 @@ would be churn for no benefit. Nothing may be ADDED to that list. If this test
 fails on a column you just wrote, the column is wrong — not the list.
 """
 
-from app.models import Base
+import ast
+import pathlib
 
+from app.models import Base
 
 # Columns that existed before this rule. Do not extend.
 LEGACY: set[str] = {
@@ -182,3 +184,88 @@ def test_the_columns_that_broke_the_deploy_are_fixed():
 def test_the_legacy_list_has_not_grown():
     """A ratchet only works if it cannot be loosened by adding a name."""
     assert len(LEGACY) == 119
+
+
+# ---------------------------------------------------------------------------
+# The same rule, read off the MIGRATIONS rather than the models
+# ---------------------------------------------------------------------------
+
+"""Four tables nothing could be inserted into, and the suite said nothing.
+
+Every model inherits `created_at` and `updated_at` declared NOT NULL with
+`server_default=func.now()`, so SQLAlchemy leaves them out of an INSERT and
+lets the database fill them. The initial schema created all thirty-five
+tables that way. Every migration since that CREATED a table declared the two
+columns NOT NULL and forgot the default — so Postgres had a NOT NULL column
+with no DEFAULT, the INSERT omitted it, and the row was refused.
+
+`roles`, `role_capabilities`, `role_screens` and `point_unloading_items`. The
+last of those is the driver's unloading log: he ticked his articles at the
+door, pressed save, and the server refused the row — which reaches a phone as
+a 500 with no detail on it, and a phone with no detail says "Something went
+wrong".
+
+Everything above this line tests the MODELS, and the models were right. The
+tests build SQLite from model metadata and never from a migration, so a
+migration that disagrees with its own model is invisible to all of them. This
+reads the migration files instead, because that is where the bug was.
+"""
+
+
+MIGRATIONS = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions"
+
+# Columns the database must fill on its own, because the ORM never sends them.
+SERVER_FILLED = {"created_at", "updated_at"}
+
+
+def _created_tables(tree: ast.AST):
+    """Every `op.create_table(...)` call in a migration, with its columns."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr == "create_table"):
+            continue
+        if not node.args:
+            continue
+        table = node.args[0]
+        name = table.value if isinstance(table, ast.Constant) else "?"
+        yield name, node.args[1:]
+
+
+def _column_name(call: ast.Call) -> str | None:
+    if not (isinstance(call.func, ast.Attribute) and call.func.attr == "Column"):
+        return None
+    if not call.args:
+        return None
+    first = call.args[0]
+    return first.value if isinstance(first, ast.Constant) else None
+
+
+def test_every_created_table_lets_the_database_fill_its_timestamps():
+    """A NOT NULL column the ORM never sends needs a DEFAULT in the database.
+
+    Without it the table exists, the application starts, every read works —
+    and the first INSERT is refused. Nothing fails until somebody tries to
+    save something, which is the worst moment to find out.
+    """
+    offenders: list[str] = []
+
+    for path in sorted(MIGRATIONS.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for table, columns in _created_tables(tree):
+            for column in columns:
+                if not isinstance(column, ast.Call):
+                    continue
+                name = _column_name(column)
+                if name not in SERVER_FILLED:
+                    continue
+                kwargs = {k.arg for k in column.keywords}
+                if "server_default" not in kwargs:
+                    offenders.append(f"{path.name}: {table}.{name}")
+
+    assert not offenders, (
+        "These columns are NOT NULL with no database default, and the ORM "
+        "never sends them — so every INSERT into the table is refused:\n  "
+        + "\n  ".join(offenders)
+    )

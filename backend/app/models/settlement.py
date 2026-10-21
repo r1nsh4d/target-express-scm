@@ -57,6 +57,22 @@ class FreightPayout(BaseModel):
         UUID(as_uuid=True), ForeignKey("settlements.id"), index=True
     )
 
+    # The parties, by name rather than by id.
+    #
+    # `services.settlement.trip_accounts` has read `row.driver.name` and
+    # `row.vehicle.owner` since it was written, and these relationships did
+    # not exist — so `GET /freights/{id}/account` raised AttributeError and
+    # returned a 500 on every single call. It is the panel on the trip screen
+    # that says what the run pays out, and it has never once loaded.
+    #
+    # No test covered that endpoint, which is how a method that could not run
+    # at all sat in the tree: the payout ARITHMETIC is tested hard, as a pure
+    # function, and the code that assembles it for a screen was not tested at
+    # all.
+    driver: Mapped["Driver"] = relationship()  # noqa: F821
+    vehicle: Mapped["Vehicle"] = relationship()  # noqa: F821
+    vehicle_owner: Mapped["VehicleOwner | None"] = relationship()  # noqa: F821
+
     def __repr__(self) -> str:
         return f"<FreightPayout {self.head} {self.amount} -> {self.payee_type}>"
 

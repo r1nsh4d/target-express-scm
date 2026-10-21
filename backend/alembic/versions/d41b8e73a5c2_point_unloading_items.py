@@ -22,6 +22,7 @@ Create Date: 2026-10-15
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "d41b8e73a5c2"
@@ -31,6 +32,11 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # server_default, not just nullable=False. SQLAlchemy leaves these
+    # out of an INSERT and lets the database fill them, so a NOT NULL
+    # column with no DEFAULT refuses every row. Added after four tables
+    # shipped without it; `e2b94c71d3a8` repairs databases already built
+    # from this file, and this fixes the ones built from it next.
     op.create_table(
         "point_unloading_items",
         sa.Column("id", sa.UUID(), nullable=False),
@@ -38,8 +44,18 @@ def upgrade() -> None:
         sa.Column("item_code", sa.String(length=48), nullable=False),
         sa.Column("item_name", sa.String(length=160), nullable=False),
         sa.Column("quantity", sa.Integer(), server_default="0", nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(
             ["freight_point_id"], ["freight_points.id"], ondelete="CASCADE"
         ),
