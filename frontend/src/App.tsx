@@ -24,6 +24,7 @@ import SettlementsPage from '@/pages/SettlementsPage'
 import TrackFindPage from '@/pages/TrackFindPage'
 import TrackPage from '@/pages/TrackPage'
 import MyDetailsPage from '@/pages/MyDetailsPage'
+import OwnerPortalPage from '@/pages/OwnerPortalPage'
 import EnquiriesPage from '@/pages/EnquiriesPage'
 import UsersPage from '@/pages/UsersPage'
 import LandingPage from '@/pages/LandingPage'
@@ -89,9 +90,20 @@ export default function App() {
       <Route path="/my-details/:token" element={<MyDetailsPage />} />
 
       <Route
+        path="/owner"
+        element={
+          <Protected allow={['VEHICLE_OWNER']}>
+            <OwnerPortalPage />
+          </Protected>
+        }
+      />
+
+      {/* An owner-driver runs trips like any other driver. His owner screens
+          are a tab inside this app rather than a second login to sign out of. */}
+      <Route
         path="/driver"
         element={
-          <Protected allow={['DRIVER']}>
+          <Protected allow={['DRIVER', 'OWNER_DRIVER']}>
             <DriverPortalPage />
           </Protected>
         }

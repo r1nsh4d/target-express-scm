@@ -541,3 +541,90 @@ def test_what_is_unsettled_is_what_he_is_ringing_about(client, world, shaji):
 
     assert Decimal(home["unsettled"]) == Decimal("1300.00")
     assert Decimal(home["advances_outstanding"]) == Decimal("400.00")
+
+
+# ===========================================================================
+# The man who owns the lorry and drives it himself
+# ===========================================================================
+
+"""Not an edge case — it is most of the hired fleet.
+
+A rented lorry settles to its owner, and the unloading cash goes to whoever
+carried the goods in. When those are the same man, both halves are his: he
+runs the trip on the driver app and reads what it paid on the owner screens.
+
+Splitting him into two logins means he signs out of one to see the other, and
+in practice means he uses whichever one somebody set up for him and rings the
+office about the half he cannot reach.
+"""
+
+
+@pytest.fixture()
+def owner_driver(client, world):
+    """Shaji: owns KL07CW3317 and drives it. One login, both halves."""
+    from sqlalchemy import select
+
+    from app.db.session import SessionLocal
+    from app.models.fleet import Driver
+
+    headers = _login(
+        "OWNER_DRIVER", "9000000801", vehicle_owner_id=world["godrej"]["owner"]
+    )
+
+    # The driver record has to point at the same login, or the driver app has
+    # no idea which man is holding the phone.
+    from app.models.user import User
+
+    db = SessionLocal()
+    try:
+        user = db.execute(
+            select(User).where(User.phone == "9000000801")
+        ).scalars().first()
+        db.execute(select(Driver)).scalars().first().user_id = user.id
+        db.commit()
+    finally:
+        db.close()
+    return headers
+
+
+def test_he_can_run_a_trip(client, world, owner_driver):
+    """Every driver endpoint is guarded on the DRIVE capability rather than
+    on the role name, so a login holding it passes without any of them
+    knowing an owner-driver exists."""
+    res = client.get("/api/driver/freights", headers=owner_driver)
+    assert res.status_code == 200, res.text
+
+
+def test_he_can_read_what_his_lorry_earned(client, world, owner_driver):
+    runs = client.get("/api/owner/runs", headers=owner_driver).json()
+
+    assert [r["trip_no"] for r in runs] == [world["godrej"]["trip_no"]]
+    assert Decimal(runs[0]["earned"]) == Decimal("1300.00")
+
+
+def test_he_sees_his_own_advances(client, world, owner_driver):
+    rows = client.get("/api/owner/advances", headers=owner_driver).json()
+    assert Decimal(rows[0]["outstanding"]) == Decimal("400.00")
+
+
+def test_he_is_still_nobody_in_the_office(client, world, owner_driver):
+    """Both halves are his own business. Neither is anybody else's."""
+    for path in ("/api/freights", "/api/reports", "/api/settlements", "/api/invoices"):
+        assert client.get(path, headers=owner_driver).status_code == 403, path
+
+
+def test_he_sees_nothing_of_another_owners_lorries(client, world, owner_driver):
+    """Being both does not widen what either half reaches."""
+    runs = client.get("/api/owner/runs", headers=owner_driver).json()
+    assert world["usha"]["trip_no"] not in [r["trip_no"] for r in runs]
+
+
+def test_a_plain_driver_still_reaches_no_owner_screen(client, world):
+    """The combined role is a grant, not a side effect of driving."""
+    headers = _login("DRIVER", "9000000802")
+    assert client.get("/api/owner/runs", headers=headers).status_code == 403
+
+
+def test_a_plain_owner_still_reaches_no_driver_screen(client, world, shaji):
+    """And not a side effect of owning, either."""
+    assert client.get("/api/driver/freights", headers=shaji).status_code == 403

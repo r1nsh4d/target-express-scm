@@ -143,6 +143,18 @@ SYSTEM_ROLE_CAPABILITIES: dict[UserRole, set[str]] = {
     UserRole.DRIVER: {Capability.DRIVE},
     UserRole.VENDOR: {Capability.VENDOR_PORTAL},
     UserRole.VEHICLE_OWNER: {Capability.OWNER_PORTAL},
+    # Runs the trip AND is paid for it, because he is both parties.
+    #
+    # The note on DRIVE says it is never granted alongside the others, and
+    # that is about OFFICE capabilities: a login that both drives and invoices
+    # is a login being shared. This is a different thing. An owner-driver is
+    # one man with one lorry, and the money he is looking at is his own.
+    #
+    # What it does mean is that whoever holds this login sees that owner's
+    # money. If he hands it to a man he employs, he has handed over his own
+    # figures — which is his decision to make about his own business, and is
+    # worth saying out loud rather than discovering.
+    UserRole.OWNER_DRIVER: {Capability.DRIVE, Capability.OWNER_PORTAL},
 }
 
 

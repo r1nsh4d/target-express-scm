@@ -19,6 +19,13 @@ class UserRole(StrEnum):
     # on that tie — it is the whole security boundary.
     VENDOR = "VENDOR"
     VEHICLE_OWNER = "VEHICLE_OWNER"
+    # The man who owns the lorry and drives it himself.
+    #
+    # Not an edge case — it is most of the hired fleet. Splitting him into two
+    # logins means he signs out of one to see the other, and in practice means
+    # he uses whichever one somebody set up and complains about the half he
+    # cannot reach.
+    OWNER_DRIVER = "OWNER_DRIVER"
 
 
 class ConsigneeType(StrEnum):

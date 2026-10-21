@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChevronRight,
   HelpCircle,
+  Truck,
   Gauge,
   IndianRupee,
   LayoutDashboard,
@@ -30,6 +31,7 @@ import {
 } from '@/components/ui'
 import { PhotoInput } from '@/components/PhotoInput'
 import { ReturnedBoxes } from '@/components/ReturnedBoxes'
+import { OwnerPanels } from '@/components/OwnerPanels'
 import { UnloadingSheet } from '@/components/UnloadingSheet'
 import { ScanBoxesSheet } from '@/components/ScanBoxesSheet'
 import { multiStopMapsUrl, singleStopMapsUrl } from '@/lib/maps'
@@ -106,7 +108,7 @@ interface Earnings {
   }[]
 }
 
-type Tab = 'home' | 'freights' | 'earnings'
+type Tab = 'home' | 'freights' | 'earnings' | 'lorry'
 
 const RouteMap = lazy(() =>
   import('@/components/RouteMap').then((m) => ({ default: m.RouteMap })),
@@ -114,6 +116,9 @@ const RouteMap = lazy(() =>
 
 export default function DriverPortalPage() {
   const { user, logout } = useAuth()
+  /* He owns the lorry and drives it himself, which is most of the hired
+     fleet. Both halves are his, so both are in one app. */
+  const isOwnerDriver = user?.role === 'OWNER_DRIVER'
   const [tab, setTab] = useState<Tab>('home')
   const [openId, setOpenId] = useState<string | null>(null)
 
@@ -151,13 +156,22 @@ export default function DriverPortalPage() {
                 [
                   ['home', 'Home', <LayoutDashboard key="h" className="size-4" />],
                   ['freights', 'Freights', <RouteIcon key="r" className="size-4" />],
-                  ...(user?.can_view_earnings
-                    ? ([['earnings', 'Earnings', <Wallet key="w" className="size-4" />]] as [
+                  /* A man who owns the lorry he is driving reads what it
+                     earned, not what we pay a driver — he is both parties,
+                     and the money is the owner's. One tab, not two logins. */
+                  ...(isOwnerDriver
+                    ? ([['lorry', 'My lorry', <Truck key="t" className="size-4" />]] as [
                         Tab,
                         string,
                         React.ReactNode,
                       ][])
-                    : []),
+                    : user?.can_view_earnings
+                      ? ([['earnings', 'Earnings', <Wallet key="w" className="size-4" />]] as [
+                          Tab,
+                          string,
+                          React.ReactNode,
+                        ][])
+                      : []),
                 ] as [Tab, string, React.ReactNode][]
               ).map(([key, label, icon]) => (
                 <button
@@ -187,7 +201,9 @@ export default function DriverPortalPage() {
                   onOpen={setOpenId}
                   onSeeAll={() => setTab('freights')}
                 />
-              ) : tab === 'freights' || !user?.can_view_earnings ? (
+              ) : tab === 'lorry' && isOwnerDriver ? (
+                <OwnerPanels />
+              ) : tab === 'freights' || !(user?.can_view_earnings || isOwnerDriver) ? (
                 /* A tab that is not drawn can still be the one in state —
                    a login whose earnings were switched off while it was
                    open would otherwise sit on a panel with no way back. */

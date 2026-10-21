@@ -10,6 +10,12 @@ export type UserRole =
   | 'ACCOUNTS'
   | 'DRIVER'
   | 'STAKEHOLDER'
+  /* Logins that belong to somebody outside Target Express. */
+  | 'VENDOR'
+  | 'VEHICLE_OWNER'
+  /* The man who owns the lorry and drives it himself — most of the hired
+     fleet. One login for both halves, because they are both his. */
+  | 'OWNER_DRIVER'
 
 export interface User {
   id: string
@@ -40,12 +46,25 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   ACCOUNTS: 'Accounts',
   DRIVER: 'Driver',
   STAKEHOLDER: 'Stakeholder',
+  VENDOR: 'Vendor',
+  VEHICLE_OWNER: 'Vehicle owner',
+  OWNER_DRIVER: 'Owner-driver',
 }
 
-/** Drivers land on the driver portal; everyone else on the operations board.
- *  `/` is the public landing page, so the console starts at `/dashboard`. */
+/** Where each kind of login starts.
+ *
+ *  Four different applications share one sign-in page, and sending somebody
+ *  to the wrong one is how a vendor concludes the link is broken. `/` is the
+ *  public landing page, so the office console starts at `/dashboard`.
+ *
+ *  An owner-driver lands on the DRIVER app, because at six in the morning he
+ *  is a man with a lorry to start, not a man reading last month's figures.
+ *  His owner screens are a tab inside it. */
 export function homePathForRole(role: UserRole): string {
-  return role === 'DRIVER' ? '/driver' : '/dashboard'
+  if (role === 'DRIVER' || role === 'OWNER_DRIVER') return '/driver'
+  if (role === 'VENDOR') return '/vendor'
+  if (role === 'VEHICLE_OWNER') return '/owner'
+  return '/dashboard'
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
