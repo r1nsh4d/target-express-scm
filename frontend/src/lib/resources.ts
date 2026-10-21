@@ -138,6 +138,10 @@ export interface Driver {
   default_vehicle_id: string | null
   user_id: string | null
   is_active: boolean
+  /* The vehicle owner this man IS, when he owns lorries and drives them
+     himself. Most of the hired fleet is owner-driven, and where the money
+     goes reads very differently when the two are one person. */
+  vehicle_owner_id: string | null
 }
 
 export interface Consignee {

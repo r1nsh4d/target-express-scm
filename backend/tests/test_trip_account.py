@@ -44,7 +44,11 @@ pytestmark = pytest.mark.tables(
     "drivers",
     "driver_pay_terms",
     "rate_cards",
+    "unloading_item_rates",
     "freights",
+    "point_unloading_items",
+    "consignments",
+    "boxes",
     "freight_points",
     "freight_legs",
     "trip_expenses",
@@ -70,7 +74,7 @@ def rented_run(client, auth):
         PayeeType,
         VehicleOwnership,
     )
-    from app.models.fleet import Driver, Vehicle, VehicleOwner
+    from app.models.fleet import Driver, Vehicle, VehicleHireTerms, VehicleOwner
     from app.models.freight import Freight, FreightLeg, FreightPoint
     from app.models.settlement import FreightPayout
     from app.models.vendor import Vendor, VendorDivision, VendorWarehouse
@@ -128,6 +132,24 @@ def rented_run(client, auth):
     )
     db.add(leg)
     db.flush()
+
+    # The terms the hire is worked out from: 13 a kilometre, so a 100 km run
+    # is 1,300. Written down rather than assumed, so a recompute produces the
+    # same figures the hand-made rows below do.
+    db.add(
+        VehicleHireTerms(
+            vehicle_id=lorry.id,
+            rate_value=Decimal("13"),
+            minimum_km_per_trip=0,
+            effective_from=TRIP_DAY - timedelta(days=30),
+        )
+    )
+    # And the unloading cash that actually left somebody's pocket at the door.
+    db.execute(
+        __import__("sqlalchemy").update(FreightPoint)
+        .where(FreightPoint.freight_id == freight.id)
+        .values(unloading_paid=Decimal("240"))
+    )
 
     # The hire, to the owner.
     db.add(
@@ -311,3 +333,132 @@ def test_a_freight_with_no_payouts_yet_is_an_empty_list(client, rented_run, auth
         db.close()
 
     assert _account(client, auth, rented_run) == []
+
+
+# ---------------------------------------------------------------------------
+# When the owner is the man driving it
+# ---------------------------------------------------------------------------
+
+"""One man, one run, one settlement.
+
+Most of the hired fleet is owner-driven. The hire settles to the owner and the
+unloading cash to the driver who handed it over — two payout rows to two
+payees, which when both are the same man is two settlements for one person's
+work on one trip. He rings to ask why he was paid twice, or worse, does not
+ring and assumes one of them is missing.
+
+So where the driver IS the owner, the unloading follows the hire to him.
+Nothing about what he is OWED changes; what changes is that it arrives as one
+settlement he can read rather than two he has to add up.
+"""
+
+
+def _make_owner_driver(run) -> None:
+    """Link the driver's login to the owner of the lorry he is driving."""
+    from app.core.security import hash_password
+    from app.db.session import SessionLocal
+    from app.models.enums import UserRole
+    from app.models.fleet import Driver
+    from app.models.user import User
+
+    db = SessionLocal()
+    try:
+        user = User(
+            full_name="Shaji",
+            phone="9000000901",
+            role=UserRole.OWNER_DRIVER,
+            hashed_password=hash_password("x"),
+            is_active=True,
+            vehicle_owner_id=run["owner"],
+        )
+        db.add(user)
+        db.flush()
+        db.get(Driver, run["driver"]).user_id = user.id
+        db.commit()
+    finally:
+        db.close()
+
+
+def _repay(run) -> None:
+    """Re-run the payout, as closing the leg does."""
+    from sqlalchemy import select
+
+    from app.db.session import SessionLocal
+    from app.models.freight import FreightLeg
+    from app.services.completion import record_leg_payouts
+
+    db = SessionLocal()
+    try:
+        leg = db.execute(
+            select(FreightLeg).where(FreightLeg.freight_id == run["freight"])
+        ).scalars().first()
+        record_leg_payouts(db, leg)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_an_owner_driver_is_paid_once(client, rented_run, auth):
+    """Both halves are his, so they arrive as one account rather than two."""
+    _make_owner_driver(rented_run)
+    _repay(rented_run)
+
+    rows = _account(client, auth, rented_run)
+
+    assert [r["payee_type"] for r in rows] == ["VEHICLE_OWNER"]
+    assert rows[0]["payee_name"] == "Shaji"
+
+
+def test_he_is_not_paid_any_less_for_it(client, rented_run, auth):
+    """The split was presentational. What he is owed does not move."""
+    _make_owner_driver(rented_run)
+    _repay(rented_run)
+
+    row = _account(client, auth, rented_run)[0]
+    # The hire plus the unloading he handed over, as before.
+    assert Decimal(row["gross"]) > Decimal("1300.00")
+
+
+def test_a_hired_driver_on_the_same_lorry_is_still_paid_separately(
+    client, rented_run, auth
+):
+    """The ordinary case is untouched: a man driving somebody else's lorry
+    gets the unloading and the owner gets the hire."""
+    _repay(rented_run)
+
+    rows = _account(client, auth, rented_run)
+    assert {r["payee_type"] for r in rows} == {"VEHICLE_OWNER", "DRIVER"}
+
+
+def test_driving_a_lorry_he_does_not_own_changes_nothing(client, rented_run, auth):
+    """Being an owner somewhere is not the same as owning THIS one."""
+    from app.core.security import hash_password
+    from app.db.session import SessionLocal
+    from app.models.enums import UserRole
+    from app.models.fleet import Driver, VehicleOwner
+    from app.models.user import User
+
+    db = SessionLocal()
+    try:
+        other = VehicleOwner(name="Basheer", phone="9000000902", is_active=True)
+        db.add(other)
+        db.flush()
+        user = User(
+            full_name="Basheer",
+            phone="9000000902",
+            role=UserRole.OWNER_DRIVER,
+            hashed_password=hash_password("x"),
+            is_active=True,
+            vehicle_owner_id=other.id,
+        )
+        db.add(user)
+        db.flush()
+        db.get(Driver, rented_run["driver"]).user_id = user.id
+        db.commit()
+    finally:
+        db.close()
+
+    _repay(rented_run)
+
+    rows = _account(client, auth, rented_run)
+    assert {r["payee_type"] for r in rows} == {"VEHICLE_OWNER", "DRIVER"}

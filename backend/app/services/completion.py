@@ -12,6 +12,7 @@ if pay terms or hire terms change before the payment run.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -27,6 +28,7 @@ from app.models.enums import (
 from app.models.fleet import Driver, DriverPayTerms, Vehicle, VehicleHireTerms
 from app.models.freight import Freight, FreightLeg
 from app.models.settlement import FreightPayout
+from app.models.user import User
 from app.services.payout import (
     DriverPayRates,
     HireRates,
@@ -167,6 +169,23 @@ def leg_facts(db: Session, leg: FreightLeg) -> LegFacts:
     )
 
 
+def driver_is_the_owner(db: Session, driver: Driver, vehicle: Vehicle) -> bool:
+    """Is the man at the wheel the man who owns the lorry?
+
+    Resolved through his login rather than stored on the driver record: the
+    tie between a user and a vehicle owner already exists, and keeping a
+    second copy of it is how the two drift apart.
+
+    False when either side is missing, which is the ordinary case — a hired
+    man driving somebody else's lorry — and the answer that leaves the
+    existing split alone.
+    """
+    if vehicle.owner_id is None or driver.user_id is None:
+        return False
+    user = db.get(User, driver.user_id)
+    return user is not None and str(user.vehicle_owner_id or "") == str(vehicle.owner_id)
+
+
 def record_leg_payouts(db: Session, leg: FreightLeg) -> list[FreightPayout]:
     """Write one payout row per charge head for a closed leg.
 
@@ -186,10 +205,26 @@ def record_leg_payouts(db: Session, leg: FreightLeg) -> list[FreightPayout]:
     payee_type = resolve_payee(vehicle.ownership)
 
     if payee_type == PayeeType.VEHICLE_OWNER:
+        hire = resolve_hire_rates(db, vehicle.id, on_date)
+
+        # The man who owns the lorry and drives it himself.
+        #
+        # The hire settles to the owner and the unloading cash to the driver
+        # who handed it over, which is two payout rows to two payees — and
+        # when both are the same man, two settlements for one person's work
+        # on one run. He then rings to ask why he was paid twice for one
+        # trip, or worse, does not ring.
+        #
+        # So the unloading follows the hire to him. Nothing about what he is
+        # OWED changes; what changes is that it arrives as one settlement he
+        # can read instead of two he has to add up.
+        if driver_is_the_owner(db, driver, vehicle):
+            hire = replace(hire, unloading_paid_to_owner=True)
+
         result = compute_leg_payout(
             vehicle.ownership,
             leg_facts(db, leg),
-            hire_rates=resolve_hire_rates(db, vehicle.id, on_date),
+            hire_rates=hire,
         )
     else:
         result = compute_leg_payout(

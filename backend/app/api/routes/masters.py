@@ -490,6 +490,24 @@ class DriverOut(ORMModel):
     default_vehicle_id: str | None
     user_id: str | None
     is_active: bool
+    # The vehicle owner this man IS, when he owns lorries and drives them.
+    #
+    # Most of the hired fleet is owner-driven, and the screens that explain
+    # where the money goes read very differently when the driver and the
+    # owner are the same person. Resolved from his login rather than stored
+    # twice: the link already exists on the user and duplicating it is how
+    # the two drift apart.
+    vehicle_owner_id: str | None = None
+
+
+def _driver_out(db: Session, driver: Driver) -> DriverOut:
+    """With the owner he is, if he is one."""
+    out = DriverOut.model_validate(driver)
+    if driver.user_id is not None:
+        user = db.get(User, driver.user_id)
+        if user is not None and user.vehicle_owner_id is not None:
+            out.vehicle_owner_id = str(user.vehicle_owner_id)
+    return out
 
 
 @router.get("/drivers", response_model=list[DriverOut])
@@ -503,7 +521,7 @@ def list_drivers(
     if not include_inactive:
         stmt = stmt.where(Driver.is_active.is_(True))
     rows = db.execute(stmt).scalars().all()
-    return [DriverOut.model_validate(r) for r in rows]
+    return [_driver_out(db, r) for r in rows]
 
 
 @router.post("/drivers", response_model=DriverOut, status_code=201)
@@ -558,7 +576,7 @@ def create_driver(payload: DriverIn, db: Session = Depends(get_db), _=FleetDep):
 
     db.commit()
     db.refresh(driver)
-    return DriverOut.model_validate(driver)
+    return _driver_out(db, driver)
 
 
 class LabourIn(BaseModel):

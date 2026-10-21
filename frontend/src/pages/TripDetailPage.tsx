@@ -909,6 +909,11 @@ function AssignModal({
   })
 
   const vehicle = vehicles.find((v) => v.id === vehicleId)
+  /* The man chosen IS the lorry's owner. Then "the hire goes to the owner
+     and the unloading to the driver" describes one person twice. */
+  const ownerIsDriving =
+    !!vehicle?.owner_id &&
+    drivers.find((d) => d.id === driverId)?.vehicle_owner_id === vehicle.owner_id
 
   return (
     <Modal open={open} onClose={onClose} title="Assign vehicle and driver">
@@ -934,26 +939,48 @@ function AssignModal({
           </Select>
         </Field>
 
-        {vehicle?.ownership === 'HIRED' ? (
-          <p
-            className="rounded-lg border px-3.5 py-2.5 text-[12.5px]"
-            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-          >
-            This is a rented vehicle, so the hire settles to {vehicle.owner_name ?? 'its owner'}.
-            The unloading cash still goes to the driver.
-          </p>
-        ) : null}
-
         <Field label="Driver">
           <Select value={driverId} onChange={(e) => setDriverId(e.target.value)} required>
             <option value="">Select a driver</option>
             {drivers.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.name} · {d.phone}
+                {/* Said in the list as well as under it, because by the time
+                    the note appears the choice has already been made. */}
+                {vehicle && d.vehicle_owner_id === vehicle.owner_id
+                  ? ' · owns this lorry'
+                  : ''}
               </option>
             ))}
           </Select>
         </Field>
+
+        {/* Where the money goes, for the pair actually chosen.
+            This said "the hire settles to Ibrahim Haji, the unloading cash
+            still goes to the driver" whoever was picked — which is true of a
+            hired man and misleading when Ibrahim is driving it himself, since
+            then "the driver" IS Ibrahim and both halves are his. */}
+        {vehicle?.ownership === 'HIRED' ? (
+          <p
+            className="rounded-lg border px-3.5 py-2.5 text-[12.5px]"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+          >
+            {ownerIsDriving ? (
+              <>
+                {vehicle.owner_name ?? 'The owner'} owns this lorry and is driving it, so the
+                hire and the unloading both settle to {vehicle.owner_name ?? 'him'}. One
+                settlement, not two.
+              </>
+            ) : (
+              <>
+                This is a rented vehicle, so the hire settles to{' '}
+                {vehicle.owner_name ?? 'its owner'} and the unloading cash goes to the driver who
+                hands it over. If {vehicle.owner_name ?? 'the owner'} drives it himself, pick him
+                here and both go to him.
+              </>
+            )}
+          </p>
+        ) : null}
 
         <ErrorNote>{error}</ErrorNote>
         <div className="flex justify-end gap-2">
