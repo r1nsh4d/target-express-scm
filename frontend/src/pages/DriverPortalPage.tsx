@@ -139,12 +139,25 @@ export default function DriverPortalPage() {
           <FreightDetail id={openId} onBack={() => setOpenId(null)} />
         ) : (
           <>
+            {/* Two kinds of driver, and only one of them is paid by us.
+
+                A man on a rented lorry runs the trip and is paid by the
+                vehicle's owner, so there is no figure of ours to show him.
+                The tab is left out entirely rather than opened onto a
+                refusal: a locked door he can see is still a question he
+                asks, and the answer is always "ask your owner". */}
             <div className="flex gap-1.5">
               {(
                 [
                   ['home', 'Home', <LayoutDashboard key="h" className="size-4" />],
                   ['freights', 'Freights', <RouteIcon key="r" className="size-4" />],
-                  ['earnings', 'Earnings', <Wallet key="w" className="size-4" />],
+                  ...(user?.can_view_earnings
+                    ? ([['earnings', 'Earnings', <Wallet key="w" className="size-4" />]] as [
+                        Tab,
+                        string,
+                        React.ReactNode,
+                      ][])
+                    : []),
                 ] as [Tab, string, React.ReactNode][]
               ).map(([key, label, icon]) => (
                 <button
@@ -174,7 +187,10 @@ export default function DriverPortalPage() {
                   onOpen={setOpenId}
                   onSeeAll={() => setTab('freights')}
                 />
-              ) : tab === 'freights' ? (
+              ) : tab === 'freights' || !user?.can_view_earnings ? (
+                /* A tab that is not drawn can still be the one in state —
+                   a login whose earnings were switched off while it was
+                   open would otherwise sit on a panel with no way back. */
                 <FreightList onOpen={setOpenId} />
               ) : (
                 <EarningsPanel />

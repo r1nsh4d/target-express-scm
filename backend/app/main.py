@@ -17,6 +17,7 @@ from app.api.routes import (
     hubcounts,
     masters,
     masters_edit,
+    ownerportal,
     nextsteps,
     presets,
     profiles,
@@ -26,6 +27,7 @@ from app.api.routes import (
     returns,
     tracking,
     uploads,
+    vendorportal,
 )
 from app.core.config import settings
 
@@ -52,6 +54,10 @@ app.include_router(advances.router)
 app.include_router(masters.router)
 app.include_router(masters_edit.router)
 app.include_router(customerlink.router)
+# Logins that belong outside the company. Their own prefixes, because
+# every query behind them filters on who the login belongs to.
+app.include_router(vendorportal.router)
+app.include_router(ownerportal.router)
 app.include_router(profiles.router)
 app.include_router(presets.router)
 # Registered after masters so /api/freights/{id}/account from advances keeps

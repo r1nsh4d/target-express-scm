@@ -64,6 +64,16 @@ class Capability:
     # being shared.
     DRIVE = "drive"
 
+    # --- logins that belong to somebody outside the company --------------- #
+    #
+    # These are not smaller versions of an office role. An office login with
+    # fewer screens still sees the whole business through them; these see one
+    # vendor's work, or one owner's lorries, and the filtering is done in the
+    # query rather than by hiding a menu. Granting one of these alongside an
+    # office capability would be a category error, so nothing does.
+    VENDOR_PORTAL = "vendor.portal"
+    OWNER_PORTAL = "owner.portal"
+
 
 CAPABILITIES: dict[str, str] = {
     Capability.OFFICE_VIEW: "See the day's freights and bills",
@@ -74,6 +84,8 @@ CAPABILITIES: dict[str, str] = {
     Capability.REPORTS: "See what the business earned",
     Capability.ADMIN: "Vendors, rate cards, users and roles",
     Capability.DRIVE: "Use the driver app",
+    Capability.VENDOR_PORTAL: "A vendor's own freights, rates and bills",
+    Capability.OWNER_PORTAL: "A vehicle owner's earnings and advances",
 }
 
 
@@ -129,6 +141,8 @@ SYSTEM_ROLE_CAPABILITIES: dict[UserRole, set[str]] = {
     # Reads the figures, moves nothing.
     UserRole.STAKEHOLDER: {Capability.OFFICE_VIEW, Capability.REPORTS},
     UserRole.DRIVER: {Capability.DRIVE},
+    UserRole.VENDOR: {Capability.VENDOR_PORTAL},
+    UserRole.VEHICLE_OWNER: {Capability.OWNER_PORTAL},
 }
 
 

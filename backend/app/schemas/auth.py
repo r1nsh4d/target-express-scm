@@ -28,6 +28,13 @@ class UserOut(BaseModel):
     # Filled from the relationship so a list of users can show which role
     # each is on without a second request per row.
     role_name: str | None = None
+    # Whether this login is shown money at all.
+    #
+    # A driver on a rented vehicle is paid by his vehicle's owner, not by
+    # Target Express, so there is no figure of ours to show him. His app
+    # leaves the earnings tab out entirely rather than opening it onto a
+    # refusal — a locked door he can see is still a question he will ask.
+    can_view_earnings: bool = False
 
     @classmethod
     def of(cls, user) -> "UserOut":

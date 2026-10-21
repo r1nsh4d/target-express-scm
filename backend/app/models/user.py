@@ -39,6 +39,19 @@ class User(BaseModel):
     # visibility should not flip with the roster.
     can_view_earnings: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Who this login belongs to, when it is not Target Express.
+    #
+    # A vendor login sees its own freights, rates and invoices and nothing
+    # else; a vehicle owner's sees what his lorries earned and what he has
+    # drawn. Without the tie there is nothing to scope a query by, and "show
+    # me my freights" quietly becomes "show me the freights".
+    vendor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("vendors.id", ondelete="SET NULL"), index=True
+    )
+    vehicle_owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("vehicle_owners.id", ondelete="SET NULL"), index=True
+    )
+
     # Loaded eagerly: every guarded request asks what this user may do,
     # and a lazy load there is a second query on every single call.
     custom_role: Mapped["Role | None"] = relationship(lazy="selectin")  # noqa: F821

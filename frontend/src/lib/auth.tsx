@@ -18,6 +18,10 @@ export interface User {
   email: string | null
   role: UserRole
   is_active: boolean
+  /* Whether this login is shown money at all. A driver on a rented vehicle
+     is paid by his vehicle's owner, so there is no figure of ours to show
+     him and the tab is left out rather than opened onto a refusal. */
+  can_view_earnings?: boolean
 }
 
 interface AuthValue {

@@ -14,6 +14,11 @@ class UserRole(StrEnum):
     ACCOUNTS = "ACCOUNTS"
     DRIVER = "DRIVER"
     STAKEHOLDER = "STAKEHOLDER"
+    # Logins that belong to somebody OUTSIDE Target Express. Each is tied to
+    # one vendor or one vehicle owner, and every endpoint behind them filters
+    # on that tie — it is the whole security boundary.
+    VENDOR = "VENDOR"
+    VEHICLE_OWNER = "VEHICLE_OWNER"
 
 
 class ConsigneeType(StrEnum):
