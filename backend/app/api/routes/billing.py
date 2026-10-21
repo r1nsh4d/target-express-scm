@@ -65,6 +65,7 @@ class PreviewLine(BaseModel):
     lr_no: str | None
     trip_date: date
     vehicle_no: str
+    vehicle_type: str | None = None
     destination_text: str | None
     point_count: int
     km: int
@@ -87,6 +88,8 @@ class PreviewOut(BaseModel):
     freight_count: int
     lines: list[PreviewLine]
     taxable_value: Decimal
+    # Toll, recharged at cost and not taxed.
+    zero_rated_value: Decimal = Decimal("0")
     gst_rate_percent: Decimal
     gst_amount: Decimal
     total: Decimal
@@ -103,6 +106,10 @@ class InvoiceRowOut(ORMModel):
     vendor_division_id: str
     vendor_division_name: str | None = None
     taxable_value: Decimal
+    # Toll, recharged at cost. Nil-rated, as the vendor's own summary has it.
+    zero_rated_value: Decimal = Decimal("0")
+    # The rate this invoice was raised at, not whatever the division says now.
+    gst_rate_percent: Decimal = Decimal("0")
     cgst: Decimal
     sgst: Decimal
     igst: Decimal
@@ -123,6 +130,7 @@ class InvoiceLineOut(ORMModel):
     trip_no: str
     lr_no: str | None
     vehicle_no: str
+    vehicle_type: str | None = None
     destination_text: str
     point_count: int
     start_km: int | None
@@ -169,11 +177,17 @@ def preview_invoice(payload: PeriodIn, db: Session = Depends(get_db), _=MoneyDep
         db, division.id, payload.period_from, payload.period_to
     )
 
-    taxable = money(sum((p.charge.line_total for p in priced), Decimal("0")))
+    # The same split the invoice itself makes: toll is recharged at cost and
+    # is not taxed, so previewing it as taxable would show a total the
+    # invoice then does not match.
+    gross = money(sum((p.charge.line_total for p in priced), Decimal("0")))
+    zero_rated = money(sum((p.toll for p in priced), Decimal("0")))
+    taxable = money(gross - zero_rated)
     gst_rate = Decimal(division.gst_rate_percent or 0)
     gst = money(taxable * gst_rate / Decimal("100"))
 
     return PreviewOut(
+        zero_rated_value=zero_rated,
         vendor_division_name=division.name,
         period_from=payload.period_from,
         period_to=payload.period_to,
@@ -202,7 +216,7 @@ def preview_invoice(payload: PeriodIn, db: Session = Depends(get_db), _=MoneyDep
         taxable_value=taxable,
         gst_rate_percent=gst_rate,
         gst_amount=gst,
-        total=money(taxable + gst),
+        total=money(gross + gst),
         problems=problems,
     )
 

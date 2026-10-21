@@ -55,6 +55,8 @@ class PricedFreight:
     freight: Freight
     charge: FreightCharge
     vehicle_no: str
+    # "Dost", "Ace". The printed invoice bills a freight charge per type.
+    vehicle_type: str | None
     toll: Decimal
     detention: Decimal
     unloading: Decimal
@@ -196,6 +198,11 @@ def price_freight(db: Session, freight: Freight) -> PricedFreight:
         freight=freight,
         charge=charge,
         vehicle_no=leg.vehicle.registration_no if leg and leg.vehicle else "—",
+        vehicle_type=(
+            leg.vehicle.vehicle_type.name
+            if leg and leg.vehicle and leg.vehicle.vehicle_type
+            else None
+        ),
         toll=toll,
         detention=detention,
         unloading=unloading,
@@ -380,7 +387,21 @@ def create_invoice(
         period_from = min(p.freight.trip_date for p in priced)
         period_to = max(p.freight.trip_date for p in priced)
 
-    taxable = money(sum((p.charge.line_total for p in priced), Decimal("0")))
+    # What is taxed, and what is only passed on.
+    #
+    # The vendor's own tax summary splits the month into 1,56,382 at 2.5% +
+    # 2.5% and 2,150 at nil, and the 2,150 is exactly the toll: cash handed to
+    # a booth and recharged at cost, not a service supplied. We were taxing
+    # it, so every invoice we raised was a little higher than the one their
+    # accountant would have raised for the same work.
+    #
+    # Toll alone, deliberately — not every reimbursement. Coolie is recharged
+    # at cost too, and their document taxes it. Matching the document they
+    # already send beats being clever about it.
+    gross = money(sum((p.charge.line_total for p in priced), Decimal("0")))
+    zero_rated = money(sum((p.toll for p in priced), Decimal("0")))
+    taxable = money(gross - zero_rated)
+
     gst_rate = Decimal(division.gst_rate_percent or 0)
     gst_total = money(taxable * gst_rate / Decimal("100"))
     half = money(gst_total / Decimal("2"))
@@ -393,12 +414,16 @@ def create_invoice(
         vendor_division_id=division.id,
         vehicle_type_label=None,
         taxable_value=taxable,
+        zero_rated_value=zero_rated,
+        # Frozen here rather than read off the division at print time, so a
+        # rate changed next year does not re-rate what was sent this one.
+        gst_rate_percent=gst_rate,
         # Intra-state by default. Place-of-supply handling is a later refinement;
         # both Godrej divisions are Kerala-to-Kerala today.
         cgst=half,
         sgst=money(gst_total - half),
         igst=Decimal("0.00"),
-        total=money(taxable + gst_total),
+        total=money(gross + gst_total),
         status=InvoiceStatus.DRAFT,
         issued_by_id=issued_by_id,
     )
@@ -416,6 +441,7 @@ def create_invoice(
                 trip_no=p.freight.trip_no,
                 lr_no=p.freight.lr_no,
                 vehicle_no=p.vehicle_no,
+                vehicle_type=p.vehicle_type,
                 destination_text=p.freight.destination_text or "—",
                 point_count=p.freight.billable_point_count,
                 start_km=p.freight.legs[0].start_odometer if p.freight.legs else None,

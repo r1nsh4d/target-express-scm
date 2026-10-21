@@ -32,6 +32,20 @@ class VendorInvoice(BaseModel):
     vehicle_type_label: Mapped[str | None] = mapped_column(String(64))
 
     taxable_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0, nullable=False)
+    # Money recharged at cost rather than supplied as a service.
+    #
+    # The vendor's own tax summary splits the month into a taxed bucket and a
+    # nil-rated one, and the nil-rated one is exactly the toll — cash handed
+    # to a booth and passed on. We were taxing it.
+    zero_rated_value: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), default=0, server_default="0", nullable=False
+    )
+    # The rate THIS invoice was raised at. Read off the division at print time
+    # until now, so changing a division's rate silently re-rated every invoice
+    # ever issued against it.
+    gst_rate_percent: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), default=0, server_default="0", nullable=False
+    )
     cgst: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0, nullable=False)
     sgst: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0, nullable=False)
     igst: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0, nullable=False)
@@ -92,6 +106,11 @@ class VendorInvoiceLine(BaseModel):
     trip_no: Mapped[str] = mapped_column(String(32), nullable=False)
     lr_no: Mapped[str | None] = mapped_column(String(32))
     vehicle_no: Mapped[str] = mapped_column(String(24), nullable=False)
+    # "Dost", "Ace". The printed invoice bills a freight charge PER TYPE,
+    # because that is how the rate is agreed and how the vendor checks it.
+    # Stored rather than looked up: a lorry can be re-typed, and an invoice
+    # must reprint as it was issued.
+    vehicle_type: Mapped[str | None] = mapped_column(String(64))
     destination_text: Mapped[str] = mapped_column(String(500), nullable=False)
     point_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 

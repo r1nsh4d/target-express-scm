@@ -63,7 +63,10 @@ class Settings(BaseSettings):
 
     # Goods Transport Agency. 9965 is the services heading; 996511 is road
     # transport of goods specifically.
-    company_sac_code: str = "996511"
+    # 9965 — what Target Express's own accountant puts on the invoices that
+    # reach Godrej today. 996511 is the more specific road-transport code
+    # and is not the one the vendor's team is reconciling against.
+    company_sac_code: str = "9965"
 
     anthropic_api_key: str | None = None
     ai_model: str = "claude-sonnet-5"

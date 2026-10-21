@@ -20,7 +20,7 @@ import {
 import type { ChargeSheetData } from '@/components/ChargeSheet'
 import { ChargeSheet } from '@/components/ChargeSheet'
 import type { Company } from '@/components/TaxInvoice'
-import { TaxInvoice } from '@/components/TaxInvoice'
+import { FreightAnnexure, TaxInvoice } from '@/components/TaxInvoice'
 import { api, apiErrorMessage } from '@/lib/api'
 import type { VendorDivision } from '@/lib/resources'
 import { STATUS_TONE, rupees, useItem, useList } from '@/lib/resources'
@@ -722,9 +722,15 @@ function InvoiceDetail({ id, onBack }: { id: string; onBack: () => void }) {
         <div className="skeleton h-96" />
       )}
 
-      {/* The working behind the unloading line, as the forms the dealers
-          signed. They print with the invoice because that is how the vendor
-          receives them today — on paper, stapled behind the bill. */}
+      {/* Behind the bill, in the order the vendor's people work through it:
+          the trips that made up each charge head, then the forms the dealers
+          signed for the unloading. Each on its own page. */}
+      <div className="tx-sheet-page">
+        <FreightAnnexure
+          invoice={inv as unknown as Parameters<typeof FreightAnnexure>[0]['invoice']}
+        />
+      </div>
+
       <InvoiceSheets invoiceId={id} companyName={company.data?.name ?? ''} />
 
 
