@@ -29,6 +29,7 @@ from app.models.user import User
 from app.services.completion import complete_freight_if_returned, record_leg_payouts
 from app.services.controls import reconcile_boxes
 from app.services.economics import driver_earnings_for_leg
+from app.services.odometer import OdometerRefused, check_distance, check_opening
 from app.services.rating import RateCardNotFound, money, resolve_rate_card
 from app.services.unloading import (
     UnloadItem,
@@ -320,6 +321,15 @@ def start_trip(
     if leg.driver_id != driver.id:
         raise HTTPException(status_code=403, detail="This trip is not assigned to you")
 
+    # The continuity check the Vehicle model has always described and
+    # nothing performed. A meter does not run backwards, and an opening
+    # reading entered as 0 or 1 is what turned one Aluva run into a 180,015
+    # km invoice line.
+    try:
+        check_opening(payload.reading, leg.vehicle.last_closing_km)
+    except OdometerRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     leg.start_odometer = payload.reading
     leg.start_odometer_photo_url = payload.photo_url
     leg.started_at = datetime.now()
@@ -552,14 +562,10 @@ def close_trip(
         raise HTTPException(status_code=403, detail="This trip is not assigned to you")
     if leg.start_odometer is None:
         raise HTTPException(status_code=400, detail="Opening reading was never recorded")
-    if payload.reading < leg.start_odometer:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Closing reading {payload.reading} is below the opening reading "
-                f"{leg.start_odometer}"
-            ),
-        )
+    try:
+        check_distance(leg.start_odometer, payload.reading)
+    except OdometerRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     leg.end_odometer = payload.reading
     leg.end_odometer_photo_url = payload.photo_url
@@ -1183,9 +1189,28 @@ def my_trip_earnings(
     )
 
 
+class FreightEarningOut(BaseModel):
+    """One run, and what it paid him."""
+
+    freight_id: str
+    trip_no: str
+    trip_date: date
+    vehicle_no: str | None
+    km: int
+    amount: Decimal
+
+
 class EarningsOut(BaseModel):
     period_from: date
     period_to: date
+    # Run by run, newest first.
+    #
+    # The month's total and a split by head are both true and neither is
+    # checkable: a driver cannot tell whether ₹2,975 is right, only whether it
+    # feels low. What he CAN check is "the Kasaragod run on the 12th paid me
+    # 420", because he remembers that run. Without this the figure is
+    # something to be accepted or argued with, and there is no third option.
+    freights: list[FreightEarningOut] = []
     trip_count: int
     by_head: dict[str, Decimal]
     gross: Decimal
@@ -1235,9 +1260,47 @@ def my_earnings(
 
     by_head: dict[str, Decimal] = {}
     gross = Decimal("0")
+    per_freight: dict[str, Decimal] = {}
     for row in rows:
         by_head[str(row.head)] = by_head.get(str(row.head), Decimal("0")) + Decimal(row.amount)
         gross += Decimal(row.amount)
+        key = str(row.freight_id)
+        per_freight[key] = per_freight.get(key, Decimal("0")) + Decimal(row.amount)
+
+    # The runs behind those totals, newest first. One query for the lot
+    # rather than one per row — a month is thirty of them.
+    freights: list[FreightEarningOut] = []
+    if per_freight:
+        for freight in (
+            db.execute(
+                select(Freight)
+                .where(Freight.id.in_(list(per_freight)))
+                .order_by(Freight.trip_date.desc(), Freight.trip_no.desc())
+            )
+            .scalars()
+            .all()
+        ):
+            his = [leg for leg in freight.legs if str(leg.driver_id) == str(driver.id)]
+            freights.append(
+                FreightEarningOut(
+                    freight_id=str(freight.id),
+                    trip_no=freight.trip_no,
+                    trip_date=freight.trip_date,
+                    vehicle_no=next(
+                        (
+                            leg.vehicle.registration_no
+                            for leg in his
+                            if leg.vehicle is not None
+                        ),
+                        None,
+                    ),
+                    # His own legs' distance. On a trip he finished as a
+                    # replacement, the kilometres the other man drove are not
+                    # his and neither is the pay for them.
+                    km=sum(leg.leg_distance_km or 0 for leg in his),
+                    amount=money(per_freight[str(freight.id)]),
+                )
+            )
 
     advances = (
         db.execute(
@@ -1253,6 +1316,7 @@ def my_earnings(
     outstanding = sum((a.outstanding for a in advances), Decimal("0"))
 
     return EarningsOut(
+        freights=freights,
         period_from=period_from,
         period_to=period_to,
         trip_count=len({row.freight_id for row in rows}),

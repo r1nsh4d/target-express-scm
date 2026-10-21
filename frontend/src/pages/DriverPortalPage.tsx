@@ -94,6 +94,16 @@ interface Earnings {
   gross: string
   advance_outstanding: string
   net: string
+  /* The runs behind the total, newest first. A month's figure is not
+     something a driver can check; a run he remembers is. */
+  freights: {
+    freight_id: string
+    trip_no: string
+    trip_date: string
+    vehicle_no: string | null
+    km: number
+    amount: string
+  }[]
 }
 
 type Tab = 'home' | 'freights' | 'earnings'
@@ -921,6 +931,43 @@ function EarningsPanel() {
           </div>
         ) : null}
       </Card>
+
+      {/* The runs behind the total.
+
+          A month's figure and a split by head are both true and neither is
+          checkable: he cannot tell whether ₹2,975 is right, only whether it
+          feels low. What he CAN check is "the Kasaragod run on the 12th paid
+          420", because he remembers that run. Without this the number is
+          something to accept or argue with, and there is no third option. */}
+      {data?.freights?.length ? (
+        <Card className="overflow-hidden">
+          <div className="px-4 py-3.5">
+            <h3 className="text-[14px] font-semibold">Run by run</h3>
+            <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+              Tap one to see how it was worked out.
+            </p>
+          </div>
+          {data.freights.map((f) => (
+            <div
+              key={f.freight_id}
+              className="flex items-center justify-between gap-3 border-t px-4 py-3"
+              style={{ borderColor: 'var(--border)' }}
+            >
+              <div className="min-w-0">
+                <p className="tnum text-[13.5px] font-medium">{f.trip_no}</p>
+                <p className="tnum text-[12px]" style={{ color: 'var(--text-faint)' }}>
+                  {new Date(f.trip_date).toLocaleDateString('en-IN')}
+                  {f.vehicle_no ? ` · ${f.vehicle_no}` : ''}
+                  {f.km ? ` · ${f.km} km` : ''}
+                </p>
+              </div>
+              <span className="tnum shrink-0 text-[14px] font-semibold">
+                {rupees(f.amount)}
+              </span>
+            </div>
+          ))}
+        </Card>
+      ) : null}
     </div>
   )
 }

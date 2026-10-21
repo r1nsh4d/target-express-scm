@@ -188,6 +188,93 @@ def create_consignment(payload: ConsignmentIn, db: Session = Depends(get_db), _=
     return _out(consignment)
 
 
+class BoxCountIn(BaseModel):
+    box_count: int = Field(ge=1, le=999)
+
+
+@router.patch("/consignments/{consignment_id}/boxes", response_model=ConsignmentOut)
+def set_box_count(
+    consignment_id: str,
+    payload: BoxCountIn,
+    db: Session = Depends(get_db),
+    _=OpsDep,
+):
+    """Correct how many cartons a bill actually has.
+
+    The count is typed from the vendor's paperwork at seven in the morning and
+    it is wrong often enough to matter: the bill says six, five turn up. Until
+    now the only remedy was to delete the consignment and re-enter it, which
+    also threw away whatever had already been attached, labelled or scanned —
+    so people printed the labels they had and corrected it in their heads.
+
+    Cartons are ADDED or REMOVED FROM THE END rather than regenerated. A box
+    already scanned or delivered keeps its barcode, because that barcode is on
+    a sticker on a real carton and somewhere in a scan log; reissuing the lot
+    would orphan both.
+    """
+    consignment = db.get(Consignment, consignment_id)
+    if consignment is None:
+        raise HTTPException(status_code=404, detail="Consignment not found")
+
+    boxes = (
+        db.execute(
+            select(Box).where(Box.consignment_id == consignment.id).order_by(Box.item_no)
+        )
+        .scalars()
+        .all()
+    )
+    current = len(boxes)
+    wanted = payload.box_count
+
+    if wanted < current:
+        # Only cartons nothing has happened to yet. One that has been loaded
+        # or delivered is a fact about a real box on a real lorry, and a count
+        # that disagrees with it is the office's problem to reconcile rather
+        # than something to make disappear.
+        removable = [
+            b
+            for b in reversed(boxes)
+            if b.status in (BoxStatus.SORTED, BoxStatus.LABELLED)
+        ]
+        if len(boxes) - len(removable) > wanted:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{len(boxes) - len(removable)} of these cartons have already been "
+                    "loaded or delivered, so the count cannot go below that. Record "
+                    "what actually happened on the trip instead."
+                ),
+            )
+        for box in removable[: current - wanted]:
+            db.delete(box)
+
+    elif wanted > current:
+        token = secrets.token_hex(3).upper()
+        for n in range(current + 1, wanted + 1):
+            db.add(
+                Box(
+                    consignment_id=consignment.id,
+                    item_no=n,
+                    barcode=f"TE-{token}-{n:03d}",
+                    item_code=boxes[0].item_code if boxes else None,
+                    item_name=boxes[0].item_name if boxes else None,
+                    status=BoxStatus.SORTED,
+                )
+            )
+
+    consignment.declared_box_count = wanted
+
+    # The stop's loaded count is built from the bills on it, so it moves too —
+    # otherwise the freight screen reports a figure the labels disagree with.
+    point = consignment.freight_point
+    if point is not None:
+        point.loaded_box_count = max(0, point.loaded_box_count + (wanted - current))
+
+    db.commit()
+    db.refresh(consignment)
+    return _out(consignment)
+
+
 @router.get("/consignments/{consignment_id}/boxes", response_model=list[BoxOut])
 def list_boxes(consignment_id: str, db: Session = Depends(get_db), _=ReadDep):
     rows = (

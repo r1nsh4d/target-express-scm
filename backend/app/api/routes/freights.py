@@ -40,6 +40,7 @@ from app.models.vendor import VendorDivision, VendorWarehouse
 from app.services.completion import record_leg_payouts
 from app.services.controls import next_lr_number
 from app.services.invoicing import billable_coolie, billable_unloading
+from app.services.odometer import OdometerRefused, check_distance
 from app.services.rating import (
     RateCardNotFound,
     RateTerms,
@@ -762,14 +763,13 @@ def correct_odometer(
     setattr(leg, payload.field, payload.corrected_value)
 
     if leg.start_odometer is not None and leg.end_odometer is not None:
-        if leg.end_odometer < leg.start_odometer:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Closing reading {leg.end_odometer} would be below the opening "
-                    f"reading {leg.start_odometer}"
-                ),
-            )
+        # The same check the driver's phone makes. A correction is the other
+        # way a leg's distance gets set, and it was the unguarded one.
+        try:
+            check_distance(leg.start_odometer, leg.end_odometer)
+        except OdometerRefused as exc:
+            db.rollback()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         leg.leg_distance_km = leg.end_odometer - leg.start_odometer
 
     freight.total_km = freight.round_trip_km

@@ -3,7 +3,7 @@ import { Printer, ScanBarcode } from 'lucide-react'
 import type { Label } from '@/components/LabelCard'
 import { LabelCard } from '@/components/LabelCard'
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import {
   Button,
@@ -77,11 +77,22 @@ export default function LabelsPage() {
       ) : (
         <>
           <Card className="overflow-hidden print:hidden">
-            <div className="px-4 py-3.5">
-              <h2 className="text-sm font-semibold">Sorting sheet</h2>
-              <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                How many boxes go to each point, in delivery order.
-              </p>
+            <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3.5">
+              <div>
+                <h2 className="text-sm font-semibold">Sorting sheet</h2>
+                <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                  How many boxes go to each point, in delivery order.
+                </p>
+              </div>
+              {/* This is where somebody discovers the count is wrong — the
+                  sheet says six and five are on the floor — so this is where
+                  the way to fix it belongs. The count lives on the bill, so
+                  that is where it is corrected. */}
+              <Link to="/consignments" className="shrink-0 no-underline">
+                <Button size="sm" variant="secondary">
+                  Correct a box count
+                </Button>
+              </Link>
             </div>
             <Table
               rows={sorting.data ?? []}

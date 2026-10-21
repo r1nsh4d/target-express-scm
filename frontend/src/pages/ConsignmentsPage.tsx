@@ -1,4 +1,5 @@
-import { Package, Plus, Printer, ScanBarcode, Wand2, X } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Package, Pencil, Plus, Printer, ScanBarcode, Wand2, X } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -19,7 +20,7 @@ import {
   Table,
   Textarea,
 } from '@/components/ui'
-import { apiErrorMessage } from '@/lib/api'
+import { api, apiErrorMessage } from '@/lib/api'
 import type { Consignee, VendorDivision, Warehouse } from '@/lib/resources'
 import { STATUS_TONE, useCreate, useList } from '@/lib/resources'
 import { useOpenOnNewParam } from '@/lib/motion'
@@ -169,10 +170,18 @@ export default function ConsignmentsPage() {
               { key: 'date', header: 'Date', render: (c) => <span className="tnum">{c.bill_date}</span> },
               { key: 'to', header: 'Customer', render: (c) => c.consignee_name ?? '—' },
               {
+                /* Editable in place.
+
+                   The count is typed from the vendor's paperwork at seven in
+                   the morning and it is wrong often enough to matter: the
+                   bill says six, five turn up. The only remedy was to delete
+                   the bill and re-enter it, which threw away whatever had
+                   already been attached and labelled — so people printed what
+                   they had and carried the correction in their heads. */
                 key: 'boxes',
                 header: 'Boxes',
                 align: 'right',
-                render: (c) => <span className="tnum">{c.declared_box_count}</span>,
+                render: (c) => <BoxCount consignment={c} />,
               },
               {
                 key: 'assigned',
@@ -215,6 +224,95 @@ export default function ConsignmentsPage() {
    second is the reprint: a label torn off in the lorry, or a bill that turned
    up after the freight was labelled. Reprinting the whole freight to recover
    one sticker wastes a sheet and puts duplicates in the godown. */
+/* The carton count, corrected where it is read.
+ *
+ * Six on the paperwork, five on the floor. Until now the only way out was to
+ * delete the bill and type it again, which also discarded whatever had been
+ * attached to a stop, labelled or scanned — so in practice nobody did, and
+ * the sorting sheet quietly stopped matching the godown.
+ *
+ * Stickers already printed keep their barcodes; cartons are added to the end
+ * or taken off it. A carton that has been loaded or delivered is a fact about
+ * a real box on a real lorry and the server refuses to remove it, which this
+ * shows rather than swallows.
+ */
+function BoxCount({ consignment }: { consignment: Consignment }) {
+  const queryClient = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(String(consignment.declared_box_count))
+  const [error, setError] = useState<string | null>(null)
+
+  const save = useMutation({
+    mutationFn: async () =>
+      (
+        await api.patch(`/consignments/${consignment.id}/boxes`, {
+          box_count: Number(value),
+        })
+      ).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/consignments'] })
+      // The stop's own count moves with it, so anything showing a freight is
+      // now stale too.
+      queryClient.invalidateQueries({ queryKey: ['/freights'] })
+      setEditing(false)
+      setError(null)
+    },
+    onError: (e) => setError(apiErrorMessage(e)),
+  })
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setValue(String(consignment.declared_box_count))
+          setEditing(true)
+        }}
+        className="tnum inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 hover:bg-[var(--surface-hover)]"
+        title="Correct the carton count"
+      >
+        {consignment.declared_box_count}
+        <Pencil className="size-3" style={{ color: 'var(--text-faint)' }} />
+      </button>
+    )
+  }
+
+  return (
+    <span
+      className="inline-flex flex-col items-end gap-1"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <span className="inline-flex items-center gap-1.5">
+        <Input
+          className="tnum w-16 text-center"
+          type="number"
+          min={1}
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') save.mutate()
+            if (e.key === 'Escape') setEditing(false)
+          }}
+          aria-label="Carton count"
+        />
+        <Button size="sm" loading={save.isPending} onClick={() => save.mutate()}>
+          Save
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+      </span>
+      {error ? (
+        <span className="max-w-[18rem] text-right text-[11.5px]" style={{ color: 'var(--danger)' }}>
+          {error}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
 function StickerSheet({
   consignment,
   onClose,

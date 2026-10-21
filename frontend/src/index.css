@@ -733,6 +733,52 @@
       padding: 0 !important;
     }
 
+    /* --- the tax invoice ------------------------------------------------ */
+
+    /* The Amount column was falling off the right-hand edge of the paper.
+
+       The lines table is 760px wide at minimum and sits in a horizontally
+       scrolling box, which is right on a screen and wrong on paper: print has
+       no scrollbar, so everything past the page width is simply cut. The
+       photograph of it shows the heading clipped mid-word as "AMOL".
+
+       So on paper the box stops scrolling, the floor comes off, and the type
+       tightens enough for fifteen columns to fit A4 portrait. Destination is
+       the one column with sentences in it, so it is the one allowed to wrap
+       rather than to push everything else off. */
+    .tax-invoice .overflow-x-auto {
+      overflow: visible !important;
+    }
+
+    .tax-invoice table {
+      min-width: 0 !important;
+      width: 100% !important;
+      table-layout: auto;
+    }
+
+    .tax-invoice th,
+    .tax-invoice td {
+      padding: 2px 3px !important;
+      font-size: 8.5px !important;
+      line-height: 1.25 !important;
+    }
+
+    /* The small grey workings under a figure — "40 × 17.00". Worth keeping,
+       so they shrink with everything else rather than being dropped. */
+    .tax-invoice td span {
+      font-size: 7.5px !important;
+    }
+
+    .tax-invoice td,
+    .tax-invoice th {
+      white-space: nowrap;
+    }
+
+    .tax-invoice td:nth-child(5) {
+      white-space: normal;
+      word-break: break-word;
+    }
+
     /* --- the invoice packet --------------------------------------------- */
 
     /* An invoice goes to the vendor with its unloading charge sheets behind

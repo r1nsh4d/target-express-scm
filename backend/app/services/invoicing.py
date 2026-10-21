@@ -32,6 +32,7 @@ from app.models.enums import (
 from app.models.expense import TripExpense
 from app.models.freight import Freight
 from app.models.vendor import VendorDivision
+from app.services.odometer import MAX_LEG_KM
 from app.services.rating import (
     FreightCharge,
     RateCardNotFound,
@@ -242,6 +243,28 @@ def price_period(
         except RateCardNotFound:
             problems.append(
                 f"{freight.trip_no} ({freight.trip_date}): no rate card covers this date"
+            )
+            continue
+
+        # A distance that cannot be a round trip, left OFF the invoice.
+        #
+        # An invoice for ₹34,28,434.24 went to the vendor on a single
+        # one-point run to Aluva, because 180,015 — the lorry's odometer —
+        # had been entered as the leg's distance. The readings are guarded
+        # now, but the freights already carrying a bad figure are still in
+        # the database, and the next sweep would bill them exactly as the
+        # first one did.
+        #
+        # Refused rather than flagged, because a warning above a tick box
+        # that is already ticked is a warning somebody clicks past. The trip
+        # comes back the moment its odometer is corrected.
+        km = freight.total_km or freight.round_trip_km
+        if km > MAX_LEG_KM:
+            priced.pop()
+            problems.append(
+                f"{freight.trip_no} ({freight.trip_date}): {km:,} km is not a round "
+                "trip — the odometer looks wrong. Correct it on the freight and this "
+                "will bill normally."
             )
 
     return priced, problems
