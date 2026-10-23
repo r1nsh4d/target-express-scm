@@ -1,14 +1,16 @@
-from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import ADMIN_ROLES, get_current_user, require_roles
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
-from app.models.enums import UserRole
+from app.models.enums import DriverEngagement, UserRole
+from app.models.fleet import Driver, VehicleOwner
 from app.models.role import Role
 from app.models.user import User
+from app.models.vendor import Vendor
 from app.schemas.auth import (
     LoginRequest,
     PasswordChange,
@@ -19,6 +21,105 @@ from app.schemas.auth import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _belongs_to(db: Session, user: User) -> str | None:
+    """Whose login this is, when it is not Target Express's."""
+    if user.vendor_id is not None:
+        vendor = db.get(Vendor, user.vendor_id)
+        return vendor.name if vendor else None
+    if user.vehicle_owner_id is not None:
+        owner = db.get(VehicleOwner, user.vehicle_owner_id)
+        return owner.name if owner else None
+    return None
+
+
+# Roles that belong to somebody outside Target Express, and what each needs
+# to be tied to. A login of one of these kinds without its tie reaches
+# nothing and reads, to the person holding it, as broken.
+OUTSIDE_TIES: dict[UserRole, str] = {
+    UserRole.VENDOR: "vendor_id",
+    UserRole.VEHICLE_OWNER: "vehicle_owner_id",
+    UserRole.OWNER_DRIVER: "vehicle_owner_id",
+}
+
+
+def _check_ties(role: UserRole, vendor_id, vehicle_owner_id, db: Session) -> None:
+    """The tie has to match the role, both ways round.
+
+    An outside login without one is refused rather than created, because the
+    alternative is a vendor signing in to a screen that tells them their
+    account is not set up — which is our mistake arriving as their problem.
+
+    An INSIDE login carrying one is refused for a different reason: nothing
+    in the office scopes queries by it, so it would be a rule that looks like
+    it is enforced and is not.
+    """
+    needed = OUTSIDE_TIES.get(role)
+
+    if needed == "vendor_id":
+        if vendor_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail="A vendor login has to say which vendor it is for.",
+            )
+        if db.get(Vendor, vendor_id) is None:
+            raise HTTPException(status_code=404, detail="That vendor does not exist")
+    elif needed == "vehicle_owner_id":
+        if vehicle_owner_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail="This login has to say which vehicle owner it is for.",
+            )
+        if db.get(VehicleOwner, vehicle_owner_id) is None:
+            raise HTTPException(
+                status_code=404, detail="That vehicle owner does not exist"
+            )
+    elif vendor_id is not None or vehicle_owner_id is not None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Only a vendor or vehicle-owner login can be tied to one. An office "
+                "login sees the whole business, and tying it to a vendor would look "
+                "like a restriction without being one."
+            ),
+        )
+
+
+def _ensure_driver_record(db: Session, user: User) -> None:
+    """An owner-driver with no driver record cannot run a trip.
+
+    The driver app finds the man holding the phone by looking up a Driver
+    whose `user_id` is his. Without one the login signs in, shows no trips,
+    and looks broken — so the record is made here rather than left as a
+    second step somebody has to know about.
+
+    An existing driver on the same phone number is linked rather than
+    duplicated: that is the same man, already on the roster.
+    """
+    existing = db.execute(
+        select(Driver).where(Driver.user_id == user.id)
+    ).scalars().first()
+    if existing is not None:
+        return
+
+    by_phone = db.execute(
+        select(Driver).where(Driver.phone == user.phone)
+    ).scalars().first()
+    if by_phone is not None:
+        by_phone.user_id = user.id
+        return
+
+    db.add(
+        Driver(
+            name=user.full_name,
+            phone=user.phone,
+            # He is paid by himself as the vehicle's owner, not by us.
+            engagement=DriverEngagement.ATTACHED_TO_HIRED_VEHICLE,
+            user_id=user.id,
+            is_active=True,
+        )
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -89,6 +190,8 @@ def create_user(
         if role.base_role:
             base = UserRole(role.base_role)
 
+    _check_ties(base, payload.vendor_id, payload.vehicle_owner_id, db)
+
     user = User(
         full_name=payload.full_name,
         phone=payload.phone,
@@ -96,12 +199,19 @@ def create_user(
         role=base,
         role_id=payload.role_id,
         can_view_earnings=payload.can_view_earnings,
+        vendor_id=payload.vendor_id,
+        vehicle_owner_id=payload.vehicle_owner_id,
         hashed_password=hash_password(payload.password),
     )
     db.add(user)
+    db.flush()
+
+    if base == UserRole.OWNER_DRIVER:
+        _ensure_driver_record(db, user)
+
     db.commit()
     db.refresh(user)
-    return UserOut.of(user)
+    return UserOut.of(user, _belongs_to(db, user))
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
@@ -140,9 +250,18 @@ def update_user(
     for field, value in data.items():
         setattr(user, field, value)
 
+    # Checked against what the user ENDS UP as, not what was sent, because a
+    # role and a tie can move in the same request — switching a driver to an
+    # owner-driver is exactly that, and validating the payload alone would
+    # miss the half that was already on the record.
+    _check_ties(user.role, user.vendor_id, user.vehicle_owner_id, db)
+
+    if user.role == UserRole.OWNER_DRIVER:
+        _ensure_driver_record(db, user)
+
     db.commit()
     db.refresh(user)
-    return UserOut.of(user)
+    return UserOut.of(user, _belongs_to(db, user))
 
 
 class ResetPasswordIn(BaseModel):
@@ -195,4 +314,4 @@ def list_users(
     _: User = Depends(require_roles(*ADMIN_ROLES)),
 ) -> list[UserOut]:
     users = db.execute(select(User).order_by(User.full_name)).scalars().all()
-    return [UserOut.of(u) for u in users]
+    return [UserOut.of(u, _belongs_to(db, u)) for u in users]

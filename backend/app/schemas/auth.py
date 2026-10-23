@@ -21,6 +21,7 @@ class UserOut(BaseModel):
     phone: str
     email: str | None
     role: UserRole
+    is_active: bool
     # The role somebody made, when this user is on one. The enum above stays
     # as the base, so everything already written against it still has an
     # answer.
@@ -34,11 +35,20 @@ class UserOut(BaseModel):
     # Target Express, so there is no figure of ours to show him. His app
     # leaves the earnings tab out entirely rather than opening it onto a
     # refusal — a locked door he can see is still a question he will ask.
+    # Per user rather than derived from the vehicle, because a driver can
+    # move between an owned and a rented lorry without his visibility
+    # flipping with the roster.
     can_view_earnings: bool = False
+    # The vendor or vehicle owner this login belongs to, when it is not ours.
+    vendor_id: uuid.UUID | None = None
+    vehicle_owner_id: uuid.UUID | None = None
+    # Their name, so a list of logins can say whose each one is without a
+    # lookup per row.
+    belongs_to: str | None = None
 
     @classmethod
-    def of(cls, user) -> "UserOut":
-        """With the custom role's name resolved.
+    def of(cls, user, belongs_to: str | None = None) -> "UserOut":
+        """With the custom role's name resolved, and whose login it is.
 
         Done here rather than at each call site, because a user list that
         shows the enum where a custom role applies tells the administrator
@@ -47,13 +57,8 @@ class UserOut(BaseModel):
         out = cls.model_validate(user)
         role = getattr(user, "custom_role", None)
         out.role_name = role.name if role is not None else None
+        out.belongs_to = belongs_to
         return out
-    is_active: bool
-    # Drivers on rented vehicles log in to run the trip but are not paid by
-    # Target Express, so their earnings screen is switched off. Per user, not
-    # derived from the vehicle, because a driver can move between an owned and a
-    # rented lorry without his visibility flipping with the roster.
-    can_view_earnings: bool = False
 
 
 class TokenResponse(BaseModel):
@@ -73,6 +78,13 @@ class UserCreate(BaseModel):
     role: UserRole
     role_id: uuid.UUID | None = None
     can_view_earnings: bool = False
+    # Who this login belongs to, when it is not Target Express.
+    #
+    # Required for the outside roles and refused for the inside ones. A
+    # vendor login with no vendor on it reaches nothing and reads as broken;
+    # an office login carrying one is a scoping rule nobody wrote.
+    vendor_id: uuid.UUID | None = None
+    vehicle_owner_id: uuid.UUID | None = None
 
 
 class UserUpdate(BaseModel):
@@ -85,6 +97,9 @@ class UserUpdate(BaseModel):
     role_id: uuid.UUID | None = None
     clear_role: bool = False
     is_active: bool | None = None
+    can_view_earnings: bool | None = None
+    vendor_id: uuid.UUID | None = None
+    vehicle_owner_id: uuid.UUID | None = None
     can_view_earnings: bool | None = None
 
 

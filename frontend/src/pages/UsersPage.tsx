@@ -28,10 +28,14 @@ interface AppUser {
   phone: string
   email: string | null
   role: UserRole
+  role_name?: string | null
+  /* Whose login this is, when it is not Target Express's. */
+  belongs_to?: string | null
   is_active: boolean
   can_view_earnings: boolean
 }
 
+/* The logins Target Express gives its own people. */
 const ROLES: UserRole[] = [
   'SUPER_ADMIN',
   'OPS_ADMIN',
@@ -40,6 +44,22 @@ const ROLES: UserRole[] = [
   'STAKEHOLDER',
   'DRIVER',
 ]
+
+/* And the ones it gives to people it does business with.
+ *
+ * Listed apart because they are a different kind of thing, not a smaller
+ * version of an office role: each is tied to one vendor or one owner and
+ * sees only their own work. Picking one here asks whose it is, and the
+ * server refuses it without an answer — a login that reaches nothing reads,
+ * to the person holding it, as a broken account. */
+const OUTSIDE_ROLES: UserRole[] = ['VENDOR', 'VEHICLE_OWNER', 'OWNER_DRIVER']
+
+const OUTSIDE_HINT: Partial<Record<UserRole, string>> = {
+  VENDOR: 'Their own freights, the rates you agreed, and their bills. Nothing of any other vendor.',
+  VEHICLE_OWNER: 'What his lorries earned, his settlements and his advances.',
+  OWNER_DRIVER:
+    'He owns the lorry and drives it himself. The driver app, with what it earned on a tab inside it.',
+}
 
 export default function UsersPage() {
   const { user: me } = useAuth()
@@ -105,7 +125,22 @@ export default function UsersPage() {
               {
                 key: 'role',
                 header: 'Role',
-                render: (u) => <Badge tone="info">{ROLE_LABELS[u.role]}</Badge>,
+                render: (u) => (
+                  <span className="inline-flex flex-col gap-1">
+                    <Badge tone={u.belongs_to ? 'warning' : 'info'}>
+                      {u.role_name ?? ROLE_LABELS[u.role]}
+                    </Badge>
+                    {/* Whose login it is, where it is not ours. A list of
+                        names with "Vendor" against three of them does not
+                        say which vendor, and that is the only thing anybody
+                        wants to know about an outside login. */}
+                    {u.belongs_to ? (
+                      <span className="text-[11px]" style={{ color: 'var(--text-faint)' }}>
+                        {u.belongs_to}
+                      </span>
+                    ) : null}
+                  </span>
+                ),
               },
               {
                 key: 'earn',
@@ -190,6 +225,10 @@ interface RoleOption {
 
 function UserForm({ open, onClose }: { open: boolean; onClose: () => void }) {
   const roles = useList<RoleOption>('/roles')
+  // Only fetched when one of the outside roles is picked — an office user
+  // being created does not need the vendor list behind the form.
+  const vendors = useList<{ id: string; name: string }>('/vendors')
+  const owners = useList<{ id: string; name: string; phone: string }>('/vehicle-owners')
   const blank = {
     full_name: '',
     phone: '',
@@ -198,6 +237,8 @@ function UserForm({ open, onClose }: { open: boolean; onClose: () => void }) {
     role: 'WAREHOUSE_ADMIN' as UserRole,
     role_id: '',
     can_view_earnings: false,
+    vendor_id: '',
+    vehicle_owner_id: '',
   }
   const [form, setForm] = useState(blank)
   const picked = roles.data?.find((r) => r.id === form.role_id)
@@ -224,6 +265,11 @@ function UserForm({ open, onClose }: { open: boolean; onClose: () => void }) {
               // Empty means a built-in role, and the server reads null for
               // that — an empty string is not a uuid and would be refused.
               role_id: form.role_id || null,
+              // Same again, and the server refuses a tie on an office role
+              // outright — so an empty string left over from switching the
+              // picker would turn a valid form into a 422.
+              vendor_id: form.vendor_id || null,
+              vehicle_owner_id: form.vehicle_owner_id || null,
             },
             { onError: (err) => setError(apiErrorMessage(err)) },
           )
@@ -287,6 +333,13 @@ function UserForm({ open, onClose }: { open: boolean; onClose: () => void }) {
                 </option>
               ))}
             </optgroup>
+            <optgroup label="Outside the company">
+              {OUTSIDE_ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {ROLE_LABELS[r]}
+                </option>
+              ))}
+            </optgroup>
             {roles.data?.filter((r) => !r.is_system).length ? (
               <optgroup label="Your roles">
                 {roles.data
@@ -310,6 +363,57 @@ function UserForm({ open, onClose }: { open: boolean; onClose: () => void }) {
             required
           />
         </Field>
+
+        {/* Whose login this is. Asked here rather than refused later,
+            because the only thing worse than a vendor with no vendor on
+            their account is finding out when they try to sign in. */}
+        {form.role === 'VENDOR' ? (
+          <Field label="Which vendor" hint={OUTSIDE_HINT.VENDOR}>
+            <Select
+              value={form.vendor_id}
+              onChange={(e) => setForm({ ...form, vendor_id: e.target.value })}
+              required
+            >
+              <option value="">Select the vendor</option>
+              {vendors.data?.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
+
+        {form.role === 'VEHICLE_OWNER' || form.role === 'OWNER_DRIVER' ? (
+          <Field
+            label="Which vehicle owner"
+            hint={OUTSIDE_HINT[form.role]}
+          >
+            <Select
+              value={form.vehicle_owner_id}
+              onChange={(e) => setForm({ ...form, vehicle_owner_id: e.target.value })}
+              required
+            >
+              <option value="">Select the owner</option>
+              {owners.data?.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name} · {o.phone}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
+
+        {form.role === 'OWNER_DRIVER' ? (
+          <p
+            className="rounded-lg border px-3.5 py-2.5 text-[12.5px]"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+          >
+            He will appear in the driver list so you can assign him to his own lorry. Anyone
+            holding this login sees that owner's money — if he employs a man to drive, give the
+            man a plain Driver login instead.
+          </p>
+        ) : null}
 
         {form.role === 'DRIVER' ? (
           <Checkbox
