@@ -78,7 +78,17 @@ class HireRates:
     per_point_amount: Decimal = Decimal("0")
     # The hire settles to the owner, but the unloading money normally goes to
     # the driver, who is the one paying the labourers at the point.
-    unloading_paid_to_owner: bool = False
+    # A rented lorry is paid for AS A LORRY: one amount to its owner
+    # covering the hire and the unloading both. Whether he drives it himself
+    # or sends a man, and what he pays that man, is his business and not
+    # Target Express's.
+    #
+    # This defaulted to False — the unloading going to the driver — which is
+    # right for an OWNED lorry, where the driver is ours and the cash he
+    # handed to the labourers is ours to reimburse. On a hired one it put
+    # Target Express in the middle of an arrangement it is not part of, and
+    # produced two settlements for one hire.
+    unloading_paid_to_owner: bool = True
 
 
 @dataclass(frozen=True)
@@ -441,10 +451,13 @@ def compute_owner_payout(rates: HireRates, facts: LegFacts) -> LegPayout:
             )
         )
 
-    # Unless the agreed rent already covers unloading, the cash paid out at the
-    # points is reimbursed - to the DRIVER by default, because he is the one who
-    # paid the labourers and splits it with the cleaner. The hire itself still
-    # settles to the owner.
+    # Unless the agreed rent already covers it, the unloading is reimbursed
+    # to the OWNER, along with the hire. A hired lorry is paid for as a
+    # lorry: one amount for the run and what was carried in, and the man at
+    # the wheel is the owner's arrangement.
+    #
+    # The flag remains for the case where Target Express has agreed to pay a
+    # hired driver directly, which happens and is worth being able to say.
     if not rates.includes_unloading:
         # An agreed figure for this run wins, floored at what was handed over
         # — nobody funds the labourers out of their own pocket.

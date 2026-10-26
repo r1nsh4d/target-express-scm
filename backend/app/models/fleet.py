@@ -143,12 +143,19 @@ class VehicleHireTerms(BaseModel):
     includes_unloading: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     per_point_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0, nullable=False)
 
-    # Unloading money goes to the driver by default even on a rented vehicle,
-    # because he is the one who pays the labourers at the point and splits it
-    # with the cleaner. The hire itself still settles to the owner. Flip this
-    # where an owner insists on receiving the unloading too.
+    # A hired lorry is paid for as a lorry: one amount to its owner covering
+    # the hire AND the unloading. Who drives it, and what that man is paid,
+    # is the owner's arrangement and not Target Express's.
+    #
+    # This defaulted the other way, sending the unloading to the driver —
+    # right for an owned lorry, where the driver is ours and the cash he
+    # handed over is ours to reimburse, and wrong for a hired one, where it
+    # put us in the middle of an arrangement we are not part of.
+    #
+    # Kept as a flag rather than removed, because Target Express paying a
+    # hired driver directly does happen and is worth being able to record.
     unloading_paid_to_owner: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False
+        Boolean, default=True, server_default="true", nullable=False
     )
     effective_from: Mapped[date] = mapped_column(Date, nullable=False)
     effective_to: Mapped[date | None] = mapped_column(Date)

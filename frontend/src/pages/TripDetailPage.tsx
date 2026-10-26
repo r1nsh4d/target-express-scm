@@ -955,30 +955,26 @@ function AssignModal({
           </Select>
         </Field>
 
-        {/* Where the money goes, for the pair actually chosen.
-            This said "the hire settles to Ibrahim Haji, the unloading cash
-            still goes to the driver" whoever was picked — which is true of a
-            hired man and misleading when Ibrahim is driving it himself, since
-            then "the driver" IS Ibrahim and both halves are his. */}
+        {/* Where the money goes.
+
+            A hired lorry is paid for as a lorry: one amount to its owner
+            covering the run and what was carried in. Who drives it, and what
+            that man is paid, is the owner's arrangement.
+
+            This said the hire went to the owner and the unloading to the
+            driver, which was the old split and made the screen describe two
+            settlements where there is now one. */}
         {vehicle?.ownership === 'HIRED' ? (
           <p
             className="rounded-lg border px-3.5 py-2.5 text-[12.5px]"
             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
           >
-            {ownerIsDriving ? (
-              <>
-                {vehicle.owner_name ?? 'The owner'} owns this lorry and is driving it, so the
-                hire and the unloading both settle to {vehicle.owner_name ?? 'him'}. One
-                settlement, not two.
-              </>
-            ) : (
-              <>
-                This is a rented vehicle, so the hire settles to{' '}
-                {vehicle.owner_name ?? 'its owner'} and the unloading cash goes to the driver who
-                hands it over. If {vehicle.owner_name ?? 'the owner'} drives it himself, pick him
-                here and both go to him.
-              </>
-            )}
+            This is a hired lorry, so the whole run — the hire and the unloading — settles to{' '}
+            {vehicle.owner_name ?? 'its owner'} as one amount.
+            {ownerIsDriving
+              ? ' He is driving it himself, so that is all of it.'
+              : ` Whatever ${vehicle.owner_name ?? 'he'} pays the driver is between the two of
+                 them, and Target Express does not record it.`}
           </p>
         ) : null}
 

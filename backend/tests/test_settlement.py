@@ -31,32 +31,45 @@ def owner_account(gross: str, drawn: str, recovered: str) -> TripAccount:
     )
 
 
-class TestRentedTripSplitsBetweenOwnerAndDriver:
-    """The hire settles to the owner; the unloading cash goes to the driver,
-    who splits it with the cleaner and labourers."""
+class TestARentedTripSettlesToItsOwner:
+    """A hired lorry is paid for as a lorry, not as a lorry plus a man.
 
-    def test_hire_goes_to_the_owner(self):
+    Target Express hires the vehicle and afterwards pays its OWNER one
+    amount: the run and what was carried in. Who drives it, and what that
+    man is paid, is the owner's arrangement — it does not reach our books.
+
+    The unloading used to go to the driver instead, which split one hire
+    into two settlements and put Target Express in the middle of an
+    arrangement it is not part of.
+    """
+
+    def test_the_hire_goes_to_the_owner(self):
         payout = compute_leg_payout(
             VehicleOwnership.HIRED,
             LegFacts(km=561, points=6, unloading_paid=Decimal("900")),
             hire_rates=HIRE,
         )
         assert payout.payee_type == PayeeType.VEHICLE_OWNER
-        assert payout.total_for(PayeeType.VEHICLE_OWNER) == money("7293.00")  # 561 x 13
+        # 561 x 13 for the run, plus the 900 carried in.
+        assert payout.total_for(PayeeType.VEHICLE_OWNER) == money("8193.00")
 
-    def test_unloading_goes_to_the_driver(self):
+    def test_the_unloading_goes_to_the_owner_as_well(self):
         payout = compute_leg_payout(
             VehicleOwnership.HIRED,
             LegFacts(km=561, points=6, unloading_paid=Decimal("900")),
             hire_rates=HIRE,
         )
-        assert payout.total_for(PayeeType.DRIVER) == money("900.00")
+        assert payout.by_head(
+            ChargeHead.LOADING_UNLOADING, PayeeType.VEHICLE_OWNER
+        ) == money("900.00")
 
-    def test_a_driver_on_a_rented_vehicle_earns_no_hire(self):
-        """He is the owner's employee for the driving; only the unloading cash
-        passes through him."""
+    def test_the_driver_of_a_hired_lorry_is_paid_nothing_by_us(self):
+        """He is paid by the man who owns the lorry. Whether that is a fair
+        share of what we paid is between the two of them."""
         payout = compute_leg_payout(
-            VehicleOwnership.HIRED, LegFacts(km=561), hire_rates=HIRE
+            VehicleOwnership.HIRED,
+            LegFacts(km=561, points=6, unloading_paid=Decimal("900")),
+            hire_rates=HIRE,
         )
         assert payout.total_for(PayeeType.DRIVER) == money("0")
 

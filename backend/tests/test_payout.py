@@ -198,26 +198,53 @@ class TestOwnerPayout:
         )
         assert payout.by_head(ChargeHead.TRANSPORTATION) == money("7500.00")
 
-    def test_unloading_goes_to_the_driver_not_the_owner(self):
-        """The hire settles to the owner, but the unloading cash goes to the
-        driver: he is the one who paid the labourers and splits it with the
-        cleaner."""
+    def test_the_unloading_goes_to_the_owner_with_the_hire(self):
+        """A hired lorry is paid for AS A LORRY.
+
+        Target Express hires the vehicle and afterwards pays its owner one
+        amount: the run and what was carried in. Whether the owner drives it
+        himself or sends a man, and what he pays that man, is his
+        arrangement and does not reach our books.
+
+        This used to go to the DRIVER, which is right for an OWNED lorry —
+        there he is ours and the cash he handed to the labourers is ours to
+        reimburse — and wrong for a hired one, where it put us in the middle
+        of an arrangement we are not part of.
+        """
         payout = compute_leg_payout(
             VehicleOwnership.HIRED,
             LegFacts(km=345, unloading_paid=Decimal("700")),
             hire_rates=HIRE_PER_KM,
         )
-        assert payout.by_head(ChargeHead.LOADING_UNLOADING, PayeeType.DRIVER) == money("700.00")
         assert payout.by_head(
             ChargeHead.LOADING_UNLOADING, PayeeType.VEHICLE_OWNER
-        ) == money("0")
+        ) == money("700.00")
+        assert payout.by_head(ChargeHead.LOADING_UNLOADING, PayeeType.DRIVER) == money("0")
 
-    def test_a_rented_leg_can_pay_two_parties(self):
+    def test_a_hire_is_one_payee(self):
+        """One lorry, one owner, one settlement to read."""
         payout = compute_leg_payout(
             VehicleOwnership.HIRED,
             LegFacts(km=345, unloading_paid=Decimal("700")),
             hire_rates=HIRE_PER_KM,
         )
+        assert payout.payees == [PayeeType.VEHICLE_OWNER]
+
+    def test_a_driver_can_still_be_paid_directly_where_that_was_agreed(self):
+        """It happens, and the terms can say so.
+
+        Kept as a flag rather than removed: a switch wired to nothing is
+        worse than no switch, and this one is wired to a real arrangement
+        that some owners make.
+        """
+        from dataclasses import replace
+
+        payout = compute_leg_payout(
+            VehicleOwnership.HIRED,
+            LegFacts(km=345, unloading_paid=Decimal("700")),
+            hire_rates=replace(HIRE_PER_KM, unloading_paid_to_owner=False),
+        )
+        assert payout.by_head(ChargeHead.LOADING_UNLOADING, PayeeType.DRIVER) == money("700.00")
         assert payout.payees == [PayeeType.VEHICLE_OWNER, PayeeType.DRIVER]
         assert payout.total_for(PayeeType.VEHICLE_OWNER) == money("4485.00")
         assert payout.total_for(PayeeType.DRIVER) == money("700.00")

@@ -12,7 +12,6 @@ if pay terms or hire terms change before the payment run.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -205,26 +204,16 @@ def record_leg_payouts(db: Session, leg: FreightLeg) -> list[FreightPayout]:
     payee_type = resolve_payee(vehicle.ownership)
 
     if payee_type == PayeeType.VEHICLE_OWNER:
-        hire = resolve_hire_rates(db, vehicle.id, on_date)
-
-        # The man who owns the lorry and drives it himself.
-        #
-        # The hire settles to the owner and the unloading cash to the driver
-        # who handed it over, which is two payout rows to two payees — and
-        # when both are the same man, two settlements for one person's work
-        # on one run. He then rings to ask why he was paid twice for one
-        # trip, or worse, does not ring.
-        #
-        # So the unloading follows the hire to him. Nothing about what he is
-        # OWED changes; what changes is that it arrives as one settlement he
-        # can read instead of two he has to add up.
-        if driver_is_the_owner(db, driver, vehicle):
-            hire = replace(hire, unloading_paid_to_owner=True)
-
+        # A hired lorry is paid for as a lorry: one amount to its owner
+        # covering the hire and the unloading. That used to need a special
+        # case here for the owner who drives his own lorry, because the
+        # unloading otherwise went to the driver and he was paid twice for
+        # one run. It is now simply what a hire means, so the special case
+        # is gone and the ordinary path does it.
         result = compute_leg_payout(
             vehicle.ownership,
             leg_facts(db, leg),
-            hire_rates=hire,
+            hire_rates=resolve_hire_rates(db, vehicle.id, on_date),
         )
     else:
         result = compute_leg_payout(

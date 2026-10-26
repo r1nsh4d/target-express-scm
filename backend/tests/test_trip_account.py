@@ -419,41 +419,57 @@ def test_he_is_not_paid_any_less_for_it(client, rented_run, auth):
     assert Decimal(row["gross"]) > Decimal("1300.00")
 
 
-def test_a_hired_driver_on_the_same_lorry_is_still_paid_separately(
-    client, rented_run, auth
-):
-    """The ordinary case is untouched: a man driving somebody else's lorry
-    gets the unloading and the owner gets the hire."""
+def test_every_hire_settles_to_the_owner_whoever_drove(client, rented_run, auth):
+    """A hired lorry is paid for as a lorry.
+
+    This used to be the case only when the driver WAS the owner — otherwise
+    the unloading went to the driver and the hire to the owner, two
+    settlements for one hire. Target Express pays for the vehicle and what
+    it carried in; the man at the wheel is the owner's arrangement.
+    """
     _repay(rented_run)
 
     rows = _account(client, auth, rented_run)
-    assert {r["payee_type"] for r in rows} == {"VEHICLE_OWNER", "DRIVER"}
+    assert [r["payee_type"] for r in rows] == ["VEHICLE_OWNER"]
 
 
-def test_driving_a_lorry_he_does_not_own_changes_nothing(client, rented_run, auth):
-    """Being an owner somewhere is not the same as owning THIS one."""
-    from app.core.security import hash_password
+def test_the_hired_driver_is_paid_nothing_by_us(client, rented_run, auth):
+    """He is paid by the man who owns the lorry, and what that comes to is
+    between the two of them."""
+    _repay(rented_run)
+
+    rows = _account(client, auth, rented_run)
+    assert not [r for r in rows if r["payee_type"] == "DRIVER"]
+
+
+def test_the_owner_gets_the_hire_and_the_unloading_together(
+    client, rented_run, auth
+):
+    """One figure to read, not two to add up."""
+    _repay(rented_run)
+
+    row = _account(client, auth, rented_run)[0]
+    heads = row["by_head"]
+    # 100 km at 13, and the 240 handed over at the door.
+    assert Decimal(heads["TRANSPORTATION"]) == Decimal("1300.00")
+    assert Decimal(heads["LOADING_UNLOADING"]) == Decimal("240.00")
+    assert Decimal(row["gross"]) == Decimal("1540.00")
+
+
+def test_a_driver_can_still_be_paid_directly_where_that_was_agreed(
+    client, rented_run, auth
+):
+    """It happens, and the terms can say so. A switch wired to nothing is
+    worse than no switch, and this one is wired to a real arrangement."""
+    from sqlalchemy import select
+
     from app.db.session import SessionLocal
-    from app.models.enums import UserRole
-    from app.models.fleet import Driver, VehicleOwner
-    from app.models.user import User
+    from app.models.fleet import VehicleHireTerms
 
     db = SessionLocal()
     try:
-        other = VehicleOwner(name="Basheer", phone="9000000902", is_active=True)
-        db.add(other)
-        db.flush()
-        user = User(
-            full_name="Basheer",
-            phone="9000000902",
-            role=UserRole.OWNER_DRIVER,
-            hashed_password=hash_password("x"),
-            is_active=True,
-            vehicle_owner_id=other.id,
-        )
-        db.add(user)
-        db.flush()
-        db.get(Driver, rented_run["driver"]).user_id = user.id
+        terms = db.execute(select(VehicleHireTerms)).scalars().first()
+        terms.unloading_paid_to_owner = False
         db.commit()
     finally:
         db.close()
