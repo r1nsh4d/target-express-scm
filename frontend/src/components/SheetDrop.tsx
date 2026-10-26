@@ -202,24 +202,28 @@ export function SheetDrop({ onRead }: { onRead: (lines: string) => void }) {
                     {preview.sample[0]?.[i] || '—'}
                   </p>
                 </div>
-                <Select
-                  className="w-[11rem] shrink-0"
-                  value={mapping[i] ?? ''}
-                  onChange={(e) =>
-                    setMapping((current) => {
-                      const next = { ...current }
-                      if (e.target.value) next[i] = e.target.value
-                      else delete next[i]
-                      return next
-                    })
-                  }
-                >
-                  {FIELDS.map((f) => (
-                    <option key={f.value} value={f.value}>
-                      {f.label}
-                    </option>
-                  ))}
-                </Select>
+                {/* The width is on the wrapper, not the control: `Select`
+                    carries `w-full` of its own and would win, taking the
+                    whole row and pushing the column name out of sight. */}
+                <div className="w-[11rem] shrink-0">
+                  <Select
+                    value={mapping[i] ?? ''}
+                    onChange={(e) =>
+                      setMapping((current) => {
+                        const next = { ...current }
+                        if (e.target.value) next[i] = e.target.value
+                        else delete next[i]
+                        return next
+                      })
+                    }
+                  >
+                    {FIELDS.map((f) => (
+                      <option key={f.value} value={f.value}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
               </div>
             ))}
           </div>

@@ -414,7 +414,9 @@ export default function DaySheetPage() {
             <div className="space-y-2">
               {/* Labels once, not on every row. */}
               <div
-                className="grid items-center gap-2 px-2 text-[11px] tracking-[0.1em] uppercase sm:grid-cols-[7.5rem_minmax(0,1fr)_4rem_2rem]"
+                /* The same padding as a row, so a label sits over its own
+                   column instead of six pixels to the left of it. */
+                className="grid items-center gap-2 pr-2 pl-3.5 text-[11px] tracking-[0.1em] uppercase sm:grid-cols-[7.5rem_minmax(0,1fr)_4rem_2rem]"
                 style={{ color: 'var(--text-faint)' }}
               >
                 <span>Bill no</span>
@@ -661,7 +663,10 @@ function LineRow({
           : 'var(--surface)',
       }}
     >
-      <div className="grid items-center gap-2 sm:grid-cols-[7.5rem_minmax(0,1fr)_4rem_2rem]">
+      {/* Aligned to the top, not the middle: a new customer's four answers
+          make that cell two rows tall, and centring left the bill number
+          floating halfway down beside it. */}
+      <div className="grid items-start gap-2 sm:grid-cols-[7.5rem_minmax(0,1fr)_4rem_2rem]">
         <Input
           value={billNo}
           placeholder="GDJ/8870"
@@ -676,20 +681,30 @@ function LineRow({
             called. So the name is editable before it becomes a record, and the
             dropdown beside it is the way back to the existing list. */}
         {isNew ? (
-          <div className="flex min-w-0 gap-2">
+          /* FOUR CONTROLS, AND A COLUMN THAT CANNOT PROMISE THE WIDTH.
+             These sat in a flex row, each asking for 8rem and refusing to
+             shrink — but `Input` carries `w-full` of its own, which won, so
+             one box took the whole cell and pushed the rest, the box count
+             and the delete button out past the edge of the card.
+
+             A grid instead. Each control gets a track and fills it, so
+             nothing can overflow whatever the window is doing. Two by two
+             until there is genuinely room for one line, because a new
+             customer is four answers and cramming them onto one row at
+             1366px is what caused this. */
+          <div className="grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-[minmax(0,1fr)_8rem_8rem_9rem]">
             <Input
               value={row.o.newCustomerName ?? line.customer_text}
               placeholder="New customer's name"
               onChange={(e) => onSet({ newCustomerName: e.target.value })}
               aria-label="New customer name"
             />
-            {/* Where, on the same line as who.
+            {/* Where, beside who.
                 A dealer's name is not a place, and a stop created without one
                 leaves the trip header blank and the driver with nothing to
                 navigate to. Asked here because "add it later under Customers"
                 is the step that never happens. */}
             <Input
-              className="w-[8rem] shrink-0"
               value={row.o.newCustomerWhere ?? ''}
               placeholder="Town or area"
               onChange={(e) => onSet({ newCustomerWhere: e.target.value })}
@@ -699,7 +714,7 @@ function LineRow({
                 the "fill in your own address" link goes, so a customer
                 created without one is one nobody can finish. */}
             <Input
-              className="tnum w-[8rem] shrink-0"
+              className="tnum"
               inputMode="tel"
               value={row.o.newCustomerPhone ?? ''}
               placeholder="Mobile"
@@ -707,9 +722,9 @@ function LineRow({
               aria-label="Their mobile number"
             />
             <Select
-              className="w-[8rem] shrink-0"
               value="__new__"
               onChange={(e) => onSet({ consignee_id: e.target.value })}
+              aria-label="Or pick a customer already on file"
             >
               <option value="__new__">New customer</option>
               {customers.map((c) => (
@@ -754,9 +769,16 @@ function LineRow({
           aria-label="Boxes"
         />
 
-        <IconBtn label={`Remove ${billNo || 'this line'}`} onClick={() => onSet({ dropped: true })}>
-          <Trash2 className="size-3.5" />
-        </IconBtn>
+        {/* Held to the height of a field so it sits on the line it belongs
+            to rather than riding above it. */}
+        <div className="flex h-11 items-center justify-center">
+          <IconBtn
+            label={`Remove ${billNo || 'this line'}`}
+            onClick={() => onSet({ dropped: true })}
+          >
+            <Trash2 className="size-3.5" />
+          </IconBtn>
+        </div>
       </div>
 
       {/* What is on the bill, where the vendor prices unloading per article.
