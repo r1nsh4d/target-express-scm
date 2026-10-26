@@ -56,8 +56,8 @@ export default function VehiclesPage() {
         key: 'ownership',
         label: 'Ownership',
         choices: [
-          { value: 'OWNED', label: 'owned' },
-          { value: 'HIRED', label: 'rented' },
+          { value: 'OWNED', label: 'company' },
+          { value: 'HIRED', label: 'outside' },
         ],
         matches: (v, value) => v.ownership === value,
       },
@@ -94,7 +94,10 @@ export default function VehiclesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        description="An owned vehicle pays its driver. A rented one pays the vehicle's owner, so a rented vehicle needs an owner on file first. The type decides which rate card prices a trip."
+        /* Their two words for it, because "owned" and "hired" are the
+           column and "company lorry" and "outside lorry" are what the office
+           says out loud — and the difference between them is who gets paid. */
+        description="A company lorry is driven by a company driver, who is paid by the kilometre. An outside lorry is paid for as a lorry: one amount to its owner covering the run and the unloading, and he pays his own man. So an outside lorry needs an owner on file first. The type decides which rate card prices a trip."
         action={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => setOpen('type')}>
@@ -181,7 +184,7 @@ export default function VehiclesPage() {
                 sub={v.vehicle_type_name ?? 'Type not set'}
                 badge={
                   <Badge tone={v.ownership === 'OWNED' ? 'success' : 'info'}>
-                    {v.ownership === 'OWNED' ? 'Owned' : 'Rented'}
+                    {v.ownership === 'OWNED' ? 'Company' : 'Outside'}
                   </Badge>
                 }
                 actions={

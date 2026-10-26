@@ -56,6 +56,14 @@ export type FieldSpec =
       kind: 'select'
       hint?: string
       options: { value: string; label: string }[]
+      /** What "nothing chosen" is called. Defaults to "Not set". */
+      blank?: string
+      /* Sent alongside, when this field changed.
+         "Omitted means unchanged" cannot express clearing a field whose
+         empty value is a real answer — a driver taken back off an owner is
+         not a driver whose owner was left alone. The API asks for a flag,
+         and this is where the form says which one. */
+      sendWith?: Record<string, unknown>
     }
 
 interface Row {
@@ -266,6 +274,8 @@ function EditModal({
       const beforeText = before === null || before === undefined ? '' : String(before)
       if (String(now ?? '') === beforeText) continue
 
+      if (f.kind === 'select' && f.sendWith) Object.assign(body, f.sendWith)
+
       if (f.kind === 'number') {
         body[f.name] = now === '' ? null : Number(now)
       } else {
@@ -346,7 +356,7 @@ function EditModal({
                     value={String(value ?? '')}
                     onChange={(e) => set(f.name, e.target.value)}
                   >
-                    <option value="">Not set</option>
+                    <option value="">{f.blank ?? 'Not set'}</option>
                     {f.options.map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}

@@ -140,6 +140,11 @@ class DriverProfileOut(BaseModel):
     name: str
     phone: str
     engagement: str
+    # Whose man he is. Null is a Target Express driver, paid by us; set, and
+    # he belongs to that owner, who pays him out of what we pay for the
+    # lorry. "On a rented vehicle" is not the answer anybody wants — the
+    # question is whose.
+    vehicle_owner_name: str | None = None
     licence_no: str | None
     is_active: bool
     has_login: bool
@@ -500,11 +505,18 @@ def driver_profile(driver_id: str, db: Session = Depends(get_db), _=ReadDep):
 
     dates = [freight.trip_date for _, freight, _ in legs]
 
+    owner = (
+        db.get(VehicleOwner, driver.vehicle_owner_id)
+        if driver.vehicle_owner_id is not None
+        else None
+    )
+
     return DriverProfileOut(
         id=str(driver.id),
         name=driver.name,
         phone=driver.phone,
         engagement=str(driver.engagement),
+        vehicle_owner_name=owner.name if owner else None,
         licence_no=driver.licence_no,
         is_active=driver.is_active,
         has_login=driver.user_id is not None,

@@ -456,6 +456,8 @@ def create_vehicle(payload: VehicleIn, db: Session = Depends(get_db), _=FleetDep
 
 
 class DriverIn(BaseModel):
+    # Whose man he is. Left out, he is ours.
+    vehicle_owner_id: str | None = None
     name: str = Field(min_length=2, max_length=160)
     phone: str = Field(min_length=6, max_length=20)
     engagement: DriverEngagement = DriverEngagement.OWN_STAFF
@@ -490,23 +492,33 @@ class DriverOut(ORMModel):
     default_vehicle_id: str | None
     user_id: str | None
     is_active: bool
-    # The vehicle owner this man IS, when he owns lorries and drives them.
-    #
-    # Most of the hired fleet is owner-driven, and the screens that explain
-    # where the money goes read very differently when the driver and the
-    # owner are the same person. Resolved from his login rather than stored
-    # twice: the link already exists on the user and duplicating it is how
-    # the two drift apart.
+    # Whose man he is. NULL is a Target Express driver; set, and he belongs
+    # to that vehicle owner.
     vehicle_owner_id: str | None = None
+    vehicle_owner_name: str | None = None
+    # And whether he IS that owner, rather than somebody the owner employs.
+    # Resolved from his login, where the tie between a user and an owner
+    # already lives.
+    is_the_owner: bool = False
 
 
 def _driver_out(db: Session, driver: Driver) -> DriverOut:
-    """With the owner he is, if he is one."""
+    """Whose man he is, and whether he is that man himself."""
     out = DriverOut.model_validate(driver)
+
+    owner_id = driver.vehicle_owner_id
+    if owner_id is not None:
+        owner = db.get(VehicleOwner, owner_id)
+        out.vehicle_owner_name = owner.name if owner else None
+
+    # An owner-driver: his login is tied to the same owner he belongs to.
+    # Read from the login rather than inferred from the driver row, because
+    # "works for Ibrahim" and "is Ibrahim" are different facts and only one
+    # of them decides who gets paid.
     if driver.user_id is not None:
         user = db.get(User, driver.user_id)
         if user is not None and user.vehicle_owner_id is not None:
-            out.vehicle_owner_id = str(user.vehicle_owner_id)
+            out.is_the_owner = str(user.vehicle_owner_id) == str(owner_id or "")
     return out
 
 
@@ -548,10 +560,22 @@ def create_driver(payload: DriverIn, db: Session = Depends(get_db), _=FleetDep):
             db.flush()
             user_id = user.id
 
+    if payload.vehicle_owner_id is not None:
+        if db.get(VehicleOwner, payload.vehicle_owner_id) is None:
+            raise HTTPException(status_code=404, detail="Vehicle owner not found")
+
     driver = Driver(
         name=payload.name,
         phone=payload.phone,
-        engagement=payload.engagement,
+        # Kept in step with who he belongs to. The two said the same thing in
+        # two places and could disagree, and the one somebody reads is
+        # whichever the screen happened to show.
+        engagement=(
+            DriverEngagement.ATTACHED_TO_HIRED_VEHICLE
+            if payload.vehicle_owner_id is not None
+            else payload.engagement
+        ),
+        vehicle_owner_id=payload.vehicle_owner_id,
         licence_no=payload.licence_no,
         licence_expiry=payload.licence_expiry,
         address=payload.address,

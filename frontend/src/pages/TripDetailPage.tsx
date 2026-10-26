@@ -909,11 +909,49 @@ function AssignModal({
   })
 
   const vehicle = vehicles.find((v) => v.id === vehicleId)
-  /* The man chosen IS the lorry's owner. Then "the hire goes to the owner
-     and the unloading to the driver" describes one person twice. */
-  const ownerIsDriving =
-    !!vehicle?.owner_id &&
-    drivers.find((d) => d.id === driverId)?.vehicle_owner_id === vehicle.owner_id
+
+  /* Whose man he is, against whose lorry this is.
+     Both sides have to be present. A company lorry has no owner on it and a
+     company driver has no owner on him, so `null === null` was true and the
+     list said "owns this lorry" against every name on every company
+     vehicle. */
+  const belongsToIt = (d: Driver) =>
+    !!vehicle?.owner_id && !!d.vehicle_owner_id && d.vehicle_owner_id === vehicle.owner_id
+
+  /* And being him. Belonging to Ibrahim and being Ibrahim are different
+     things, and only the second is "owns this lorry". */
+  const ownsIt = (d: Driver) => belongsToIt(d) && d.is_the_owner
+
+  const ownerIsDriving = (() => {
+    const chosen = drivers.find((d) => d.id === driverId)
+    return !!chosen && ownsIt(chosen)
+  })()
+
+  /* The right man is nearly always one of a handful, and the list holds
+     every driver on file. A hired lorry is driven by its owner or by one of
+     his men; a company lorry by a company driver. Put those at the top and
+     name the rest by whose they are, so picking Ibrahim's man for our own
+     lorry has to be done deliberately rather than by scrolling. */
+  const groups = (() => {
+    if (!vehicle) return [{ label: '', men: drivers }]
+
+    const ours = drivers.filter((d) => !d.vehicle_owner_id)
+    if (!vehicle.owner_id) {
+      const outside = drivers.filter((d) => d.vehicle_owner_id)
+      return [
+        { label: 'Target Express drivers', men: ours },
+        { label: 'On outside lorries', men: outside },
+      ]
+    }
+
+    const his = drivers.filter(belongsToIt)
+    const rest = drivers.filter((d) => !belongsToIt(d) && d.vehicle_owner_id)
+    return [
+      { label: `${vehicle.owner_name ?? 'The owner'} and his men`, men: his },
+      { label: 'Other outside drivers', men: rest },
+      { label: 'Target Express drivers', men: ours },
+    ]
+  })().filter((g) => g.men.length > 0)
 
   return (
     <Modal open={open} onClose={onClose} title="Assign vehicle and driver">
@@ -933,7 +971,10 @@ function AssignModal({
             <option value="">Select a vehicle</option>
             {vehicles.map((v) => (
               <option key={v.id} value={v.id}>
-                {v.registration_no} · {v.ownership === 'OWNED' ? 'owned' : 'rented'}
+                {/* Named rather than just "rented", because which owner it
+                    is decides which men to offer below it. */}
+                {v.registration_no} ·{' '}
+                {v.ownership === 'OWNED' ? 'company' : (v.owner_name ?? 'outside')}
               </option>
             ))}
           </Select>
@@ -942,15 +983,22 @@ function AssignModal({
         <Field label="Driver">
           <Select value={driverId} onChange={(e) => setDriverId(e.target.value)} required>
             <option value="">Select a driver</option>
-            {drivers.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name} · {d.phone}
-                {/* Said in the list as well as under it, because by the time
-                    the note appears the choice has already been made. */}
-                {vehicle && d.vehicle_owner_id === vehicle.owner_id
-                  ? ' · owns this lorry'
-                  : ''}
-              </option>
+            {groups.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.men.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} · {d.phone}
+                    {/* Said in the list as well as under it, because by the
+                        time the note appears the choice has already been
+                        made. */}
+                    {ownsIt(d)
+                      ? ' · owns this lorry'
+                      : belongsToIt(d)
+                        ? ' · his driver'
+                        : ''}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </Select>
         </Field>
@@ -1505,7 +1553,8 @@ function SwapVehicleModal({
               <option value="">Select</option>
               {vehicles.map((v) => (
                 <option key={v.id} value={v.id}>
-                  {v.registration_no} · {v.ownership === 'OWNED' ? 'owned' : 'rented'}
+                  {v.registration_no} ·{' '}
+                  {v.ownership === 'OWNED' ? 'company' : (v.owner_name ?? 'outside')}
                 </option>
               ))}
             </Select>

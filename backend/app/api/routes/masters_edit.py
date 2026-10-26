@@ -43,7 +43,7 @@ from app.db.session import get_db
 from app.models.billing import VendorInvoiceLine
 from app.models.consignee import Consignee
 from app.models.consignment import Consignment
-from app.models.enums import GeoConfidence
+from app.models.enums import DriverEngagement, GeoConfidence
 from app.models.fleet import (
     Driver,
     Labour,
@@ -387,6 +387,11 @@ class DriverPatch(BaseModel):
     phone: str | None = Field(default=None, max_length=20)
     licence_no: str | None = Field(default=None, max_length=40)
     default_vehicle_id: str | None = None
+    # Whose man he is. Sent as null to make him ours again, which is why it
+    # is paired with a flag rather than relying on "omitted means unchanged"
+    # — null is a real answer here.
+    vehicle_owner_id: str | None = None
+    set_owner: bool = False
     is_active: bool | None = None
 
 
@@ -396,6 +401,21 @@ def update_driver(
 ):
     obj = _load(db, Driver, item_id, "Driver")
     data = payload.model_dump(exclude_unset=True)
+
+    # Moving a man between Target Express and an owner, or the other way.
+    set_owner = data.pop("set_owner", False)
+    owner_id = data.pop("vehicle_owner_id", None)
+    if set_owner:
+        if owner_id is not None and db.get(VehicleOwner, owner_id) is None:
+            raise HTTPException(status_code=404, detail="Vehicle owner not found")
+        obj.vehicle_owner_id = uuid.UUID(owner_id) if owner_id else None
+        # Kept in step, so the badge on his tile and the record agree.
+        obj.engagement = (
+            DriverEngagement.ATTACHED_TO_HIRED_VEHICLE
+            if owner_id
+            else DriverEngagement.OWN_STAFF
+        )
+
     if "default_vehicle_id" in data:
         data["default_vehicle_id"] = (
             uuid.UUID(data["default_vehicle_id"]) if data["default_vehicle_id"] else None

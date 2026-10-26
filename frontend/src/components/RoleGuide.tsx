@@ -118,11 +118,58 @@ const ROLE_GUIDES: RoleGuide[] = [
     not: 'Nothing about rates, other drivers, other customers, or what the vendor is charged. One trip and one stop at a time.',
     start: { label: 'The driver app', to: '/driver' },
   },
+  /* The three outside logins.
+   *
+   * They were built and then left out of the guide, which is the worst of both:
+   * the office cannot tell somebody what the login they just made is for.
+   *
+   * THE DRIVER OF AN OUTSIDE LORRY IS THE ONE WORTH READING TWICE. He holds a
+   * plain Driver login with the earnings switched off, and that is not a
+   * demotion — Target Express does not pay him, so it has no figure to show
+   * him. What he is paid is his owner's arrangement, and the owner reads his
+   * own half on the login below. */
+  {
+    role: 'VEHICLE_OWNER',
+    what: 'A man whose lorries Target Express hires. His money, and nothing else.',
+    does: [
+      'Signs in at /owner with his own mobile number',
+      'Sees every run his lorries did and what each one pays him — run by run, not one monthly figure',
+      'Reads his settlements and what each was made up of, less any advance recovered',
+      'Reads the advances he has drawn and what is left to come off a settlement',
+      'Sees his own drivers and which of them has a login',
+    ],
+    not: 'Nothing about what the vendor was charged. The gap between what Godrej pays and what he is paid is Target Express’s margin, and he cannot create or change anything — ask the office. One owner may have several lorries; he sees all of his and none of anybody else’s.',
+    start: { label: 'The owner portal', to: '/owner' },
+  },
+  {
+    role: 'OWNER_DRIVER',
+    what: 'One man, one lorry, one login: he owns it and he drives it himself.',
+    does: [
+      'Signs in at /driver and runs the trip exactly as any driver does',
+      'Reads his owner’s earnings, settlements and advances on a tab inside the same app',
+      'Draws an advance against what his own lorry has earned',
+    ],
+    not: 'He is not two logins. Give this to a man who owns the lorry he drives — if he employs somebody else to drive it, that man gets a plain Driver login instead, because anyone holding this one sees the owner’s money.',
+    start: { label: 'The driver app', to: '/driver' },
+  },
+  {
+    role: 'VENDOR',
+    what: 'A customer’s own login — Godrej, Dost, Ace — into their own work and no one else’s.',
+    does: [
+      'Signs in at /vendor',
+      'Raises a freight themselves instead of ringing it through',
+      'Reads the rate card they are on, as agreed and not editable',
+      'Reads their freights, the charges on each and the attachments and photos from every point',
+      'Reads the invoices raised against them, with the unloading charge sheets behind each one',
+    ],
+    not: 'Another vendor’s freight does not exist for this login — not refused, not found. Nothing about drivers’ pay, hire or what a run cost Target Express.',
+    start: { label: 'The vendor portal', to: '/vendor' },
+  },
 ]
 
 /* Their own card, opened; the rest collapsed.
  *
- * Six roles down a page is a page nobody reads. Knowing what the other logins
+ * Nine roles down a page is a page nobody reads. Knowing what the other logins
  * are for is useful once and in the way every day after that. */
 export function YourRole() {
   const { user } = useAuth()
@@ -171,7 +218,7 @@ function RoleCard({ guide, isMine }: { guide: RoleGuide; isMine: boolean }) {
               : { background: 'var(--bg-elevated)', color: 'var(--text-muted)' }
           }
         >
-          {guide.role === 'DRIVER' ? (
+          {guide.role === 'DRIVER' || guide.role === 'OWNER_DRIVER' ? (
             <Smartphone className="size-4" />
           ) : (
             <Monitor className="size-4" />

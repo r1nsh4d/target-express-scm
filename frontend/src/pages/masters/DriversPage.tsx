@@ -15,12 +15,12 @@ import {
   Select,
   Spinner,
 } from '@/components/ui'
-import { byName, choicesFrom, useFilters } from '@/components/Filters'
+import { byName, useFilters } from '@/components/Filters'
 import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
 import { DriverDetail } from '@/components/Profiles'
 import { RowActions } from '@/components/RowActions'
 import { apiErrorMessage } from '@/lib/api'
-import type { Driver, Vehicle } from '@/lib/resources'
+import type { Driver, Vehicle, VehicleOwner } from '@/lib/resources'
 import { useCreate, useList } from '@/lib/resources'
 import { useOpenOnNewParam } from '@/lib/motion'
 
@@ -32,20 +32,37 @@ export default function DriversPage() {
   useOpenOnNewParam(useCallback(() => setOpen(true), []))
   const drivers = useList<Driver>('/drivers')
   const vehicles = useList<Vehicle>('/vehicles')
+  const owners = useList<VehicleOwner>('/vehicle-owners')
+
+  // Every owner, for the form: a man is given to an owner who has nobody yet.
+  const ownerOptions = (owners.data ?? []).map((o) => ({ value: o.id, label: o.name }))
 
   const all = drivers.data ?? []
+
+  /* Only the owners somebody is actually on, for the filter. A choice that
+     empties the list is a dead end, and most owners here have no driver on
+     file at all. */
+  const withDrivers = new Set(all.map((d) => d.vehicle_owner_id).filter(Boolean))
   const view = useFilters<Driver>({
     rows: all,
     placeholder: 'Search by name or phone',
-    search: (d) => [d.name, d.phone, d.licence_no],
+    search: (d) => [d.name, d.phone, d.licence_no, d.vehicle_owner_name],
     filters: [
       {
-        key: 'engagement',
-        label: 'Paid by',
-        choices: choicesFrom(all, (d) => d.engagement, (v) =>
-          v === 'OWN_STAFF' ? 'Target Express' : "the vehicle's owner",
-        ),
-        matches: (d, v) => d.engagement === v,
+        /* Whose man he is, which is also who pays him.
+           One owner with four lorries and three drivers is ordinary, so
+           "on a rented vehicle" was not a useful answer on its own — the
+           question people ask is "who are Ibrahim's drivers". */
+        key: 'whose',
+        label: 'Whose driver',
+        choices: [
+          ...(all.some((d) => !d.vehicle_owner_id)
+            ? [{ value: 'ours', label: 'Target Express' }]
+            : []),
+          ...ownerOptions.filter((o) => withDrivers.has(o.value)),
+        ],
+        matches: (d, v) =>
+          v === 'ours' ? !d.vehicle_owner_id : d.vehicle_owner_id === v,
       },
       {
         // The gap that stops a man working: no login, no phone, no trip.
@@ -61,10 +78,12 @@ export default function DriversPage() {
     sorts: [
       { key: 'name', label: 'A to Z', compare: byName<Driver>((d) => d.name) },
       {
-        key: 'engagement',
-        label: 'By who pays',
+        key: 'whose',
+        label: 'By whose they are',
+        // Ours first, then each owner's men together.
         compare: (a, b) =>
-          a.engagement.localeCompare(b.engagement) || a.name.localeCompare(b.name),
+          (a.vehicle_owner_name ?? '').localeCompare(b.vehicle_owner_name ?? '') ||
+          a.name.localeCompare(b.name),
       },
     ],
   })
@@ -121,8 +140,16 @@ export default function DriversPage() {
                 // name rather than three columns away.
                 sub={<span className="tnum">{d.phone}</span>}
                 badge={
-                  <Badge tone={d.engagement === 'OWN_STAFF' ? 'success' : 'info'}>
-                    {d.engagement === 'OWN_STAFF' ? 'Own staff' : 'On a rented vehicle'}
+                  /* Whose man he is, not just that he is somebody's.
+                     A name is the answer people are after, and "on a rented
+                     vehicle" against three men from three owners tells them
+                     nothing they can act on. */
+                  <Badge tone={d.vehicle_owner_id ? 'info' : 'success'}>
+                    {d.vehicle_owner_id
+                      ? d.is_the_owner
+                        ? 'Owner-driver'
+                        : (d.vehicle_owner_name ?? "An owner's man")
+                      : 'Target Express'}
                   </Badge>
                 }
                 actions={
@@ -139,11 +166,27 @@ export default function DriversPage() {
                         hint: 'Also his login username',
                       },
                       { name: 'licence_no', label: 'Licence number' },
+                      {
+                        name: 'vehicle_owner_id',
+                        label: 'Whose driver is he',
+                        kind: 'select' as const,
+                        blank: 'Target Express',
+                        hint: 'An owner pays his own men out of what we pay for the lorry',
+                        options: ownerOptions,
+                        // Null is a real answer here, so it travels with a flag.
+                        sendWith: { set_owner: true },
+                      },
                     ]}
                   />
                 }
               />
               <Facts>
+                {/* Who pays him for driving, which is the one thing about an
+                    outside driver that changes what the office does. */}
+                <Fact
+                  label="Paid by"
+                  value={d.vehicle_owner_id ? (d.vehicle_owner_name ?? 'His owner') : 'Target Express'}
+                />
                 <Fact
                   label="Licence"
                   value={d.licence_no ?? 'Not on file'}
@@ -167,7 +210,12 @@ export default function DriversPage() {
 
       <DriverDetail driverId={viewing} open={viewing !== null} onClose={() => setViewing(null)} />
 
-      <DriverForm open={open} onClose={() => setOpen(false)} vehicles={vehicles.data ?? []} />
+      <DriverForm
+        open={open}
+        onClose={() => setOpen(false)}
+        vehicles={vehicles.data ?? []}
+        owners={owners.data ?? []}
+      />
     </div>
   )
 }
@@ -176,15 +224,17 @@ function DriverForm({
   open,
   onClose,
   vehicles,
+  owners,
 }: {
   open: boolean
   onClose: () => void
   vehicles: Vehicle[]
+  owners: VehicleOwner[]
 }) {
   const blank = {
     name: '',
     phone: '',
-    engagement: 'OWN_STAFF',
+    vehicle_owner_id: '',
     licence_no: '',
     default_vehicle_id: '',
     per_km_amount: '2.50',
@@ -196,7 +246,12 @@ function DriverForm({
   }
   const [form, setForm] = useState(blank)
   const [error, setError] = useState<string | null>(null)
-  const onRental = form.engagement === 'ATTACHED_TO_HIRED_VEHICLE'
+  /* Whose man he is decides everything else on this form: who pays him by
+     the kilometre, whether he is shown money at all, and which lorries he
+     should be offered for. One question instead of an `engagement` the
+     office had to keep in step by hand. */
+  const onRental = form.vehicle_owner_id !== ''
+  const owner = owners.find((o) => o.id === form.vehicle_owner_id)
 
   const create = useCreate<Record<string, unknown>>('/drivers', {
     alsoInvalidate: ['/auth/users'],
@@ -217,7 +272,7 @@ function DriverForm({
             {
               name: form.name,
               phone: form.phone,
-              engagement: form.engagement,
+              vehicle_owner_id: form.vehicle_owner_id || null,
               licence_no: form.licence_no || null,
               default_vehicle_id: form.default_vehicle_id || null,
               per_km_amount: onRental ? '0' : form.per_km_amount,
@@ -249,13 +304,20 @@ function DriverForm({
           </Field>
         </div>
 
-        <Field label="Engagement">
+        <Field
+          label="Whose driver is he"
+          hint="An outside lorry's driver is paid by its owner, not by us"
+        >
           <Select
-            value={form.engagement}
-            onChange={(e) => setForm({ ...form, engagement: e.target.value })}
+            value={form.vehicle_owner_id}
+            onChange={(e) => setForm({ ...form, vehicle_owner_id: e.target.value })}
           >
-            <option value="OWN_STAFF">Target Express staff</option>
-            <option value="ATTACHED_TO_HIRED_VEHICLE">Comes with a rented vehicle</option>
+            <option value="">Target Express — our own staff</option>
+            {owners.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
           </Select>
         </Field>
 
@@ -264,8 +326,11 @@ function DriverForm({
             className="rounded-lg border px-3.5 py-2.5 text-[12.5px]"
             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
           >
-            Target Express does not pay this driver for driving — his owner does. He still
-            receives the unloading cash, and his earnings screen is switched off.
+            An outside lorry is paid for as a lorry: one amount to{' '}
+            {owner?.name ?? 'its owner'} covering the run and the unloading both. Whatever{' '}
+            {owner?.name ?? 'he'} pays this man is between the two of them, so there is no
+            per-km rate to set here and his earnings screen is switched off. He gets a
+            login to run trips and update deliveries, nothing more.
           </p>
         ) : null}
 

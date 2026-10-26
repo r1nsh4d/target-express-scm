@@ -36,7 +36,7 @@ from app.api.deps import get_current_user, require_capability
 from app.core.privileges import Capability
 from app.db.session import get_db
 from app.models.enums import AdvanceStatus, PayeeType
-from app.models.fleet import Vehicle, VehicleOwner
+from app.models.fleet import Driver, Vehicle, VehicleOwner
 from app.models.freight import Freight, FreightLeg
 from app.models.settlement import Advance, FreightPayout, Settlement
 from app.models.user import User
@@ -78,6 +78,10 @@ def _my_vehicles(db: Session, owner_id: str) -> list:
 class OwnerHomeOut(BaseModel):
     owner_name: str
     vehicles: list[dict]
+    # His own men. One owner with four lorries and three drivers is an
+    # ordinary arrangement, and until a driver knew whose he was there was
+    # no way to ask the question.
+    drivers: list[dict]
     # The month, in the only terms that matter to him.
     trips_this_month: int
     km_this_month: int
@@ -149,8 +153,29 @@ def home(db: Session = Depends(get_db), owner_id: str = Depends(_my_owner), _=Po
         .all()
     )
 
+    drivers = (
+        db.execute(
+            select(Driver)
+            .where(Driver.vehicle_owner_id == owner_id, Driver.is_active.is_(True))
+            .order_by(Driver.name)
+        )
+        .scalars()
+        .all()
+    )
+
     return OwnerHomeOut(
         owner_name=owner.name if owner else "—",
+        drivers=[
+            {
+                "id": str(d.id),
+                "name": d.name,
+                "phone": d.phone,
+                # Whether he can run a trip from his own phone, which is the
+                # only thing the owner can act on from this screen.
+                "has_login": d.user_id is not None,
+            }
+            for d in drivers
+        ],
         vehicles=[
             {
                 "id": str(v.id),

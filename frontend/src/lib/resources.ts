@@ -138,10 +138,18 @@ export interface Driver {
   default_vehicle_id: string | null
   user_id: string | null
   is_active: boolean
-  /* The vehicle owner this man IS, when he owns lorries and drives them
-     himself. Most of the hired fleet is owner-driven, and where the money
-     goes reads very differently when the two are one person. */
+  /* Whose man he is. Null is a Target Express driver, paid by us. Set, and
+     he belongs to that owner, who pays him out of what we pay for the
+     lorry — and what he is paid is not our business.
+
+     Belonging to Ibrahim and BEING Ibrahim are different things, and only
+     the second changes who is paid, which is what `is_the_owner` answers.
+     Comparing ids instead got it wrong: an owned lorry has no owner and a
+     company driver has no owner, so `null === null` printed "owns this
+     lorry" against every name on every company vehicle. */
   vehicle_owner_id: string | null
+  vehicle_owner_name: string | null
+  is_the_owner: boolean
 }
 
 export interface Consignee {

@@ -176,6 +176,20 @@ class Driver(BaseModel):
     engagement: Mapped[DriverEngagement] = mapped_column(
         String(32), default=DriverEngagement.OWN_STAFF, nullable=False
     )
+
+    # Whose man he is.
+    #
+    # NULL is a Target Express driver, paid by us. Set, and he belongs to
+    # that vehicle owner — he drives the owner's lorries, the owner pays him,
+    # and what he is paid is not our business.
+    #
+    # `engagement` hinted at this and could not carry it: it says a man
+    # drives somebody else's lorry, not WHOSE. One owner with four lorries
+    # and three drivers is an ordinary arrangement, and "who are Ibrahim's
+    # drivers" is the question behind giving one of them a login.
+    vehicle_owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("vehicle_owners.id", ondelete="SET NULL"), index=True
+    )
     licence_no: Mapped[str | None] = mapped_column(String(40))
     licence_expiry: Mapped[date | None] = mapped_column(Date)
     address: Mapped[str | None] = mapped_column(Text)

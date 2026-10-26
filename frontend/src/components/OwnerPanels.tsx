@@ -16,7 +16,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { HandCoins, Route, Truck, Wallet } from 'lucide-react'
+import { HandCoins, Route, Truck, UserRound, Wallet } from 'lucide-react'
 
 import { Badge, Card, EmptyState, Spinner } from '@/components/ui'
 import { api } from '@/lib/api'
@@ -25,6 +25,10 @@ import { STATUS_TONE, rupees } from '@/lib/resources'
 interface OwnerHome {
   owner_name: string
   vehicles: { id: string; registration_no: string; last_closing_km: number | null; is_active: boolean }[]
+  /* His own men. One owner with four lorries and three drivers is an
+     ordinary arrangement, and until a driver knew whose he was there was no
+     way to ask the question. */
+  drivers: { id: string; name: string; phone: string; has_login: boolean }[]
   trips_this_month: number
   km_this_month: number
   earned_this_month: string
@@ -149,6 +153,47 @@ export function OwnerPanels() {
           </div>
         ))}
       </Card>
+
+      {/* His men.
+          He pays them himself out of what Target Express pays for the lorry,
+          so there are no amounts here — the one thing he can act on is
+          whether a man can run a trip from his own phone, which is a
+          question for the office and not something to fix on this screen. */}
+      {h.drivers.length ? (
+        <Card className="overflow-hidden">
+          <div className="px-4 py-3.5">
+            <h3 className="flex items-center gap-2 text-[14px] font-semibold">
+              <UserRound className="size-4" style={{ color: 'var(--text-faint)' }} />
+              {h.drivers.length === 1 ? 'Your driver' : 'Your drivers'}
+            </h3>
+          </div>
+          {h.drivers.map((d) => (
+            <div
+              key={d.id}
+              className="flex items-center justify-between gap-3 border-t px-4 py-2.5"
+              style={{ borderColor: 'var(--border)' }}
+            >
+              <div className="min-w-0">
+                <p className="truncate text-[13.5px] font-medium">{d.name}</p>
+                <p className="tnum text-[12px]" style={{ color: 'var(--text-faint)' }}>
+                  {d.phone}
+                </p>
+              </div>
+              <Badge tone={d.has_login ? 'success' : 'warning'}>
+                {d.has_login ? 'has a login' : 'no login yet'}
+              </Badge>
+            </div>
+          ))}
+          <p
+            className="border-t px-4 py-2.5 text-[11.5px]"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-faint)' }}
+          >
+            A driver with a login runs the trip and updates the deliveries from his own
+            phone. He is shown no money — what you pay him is between the two of you. Ask
+            Target Express to add or remove one.
+          </p>
+        </Card>
+      ) : null}
 
       {/* Run by run, for the same reason the driver's screen is: a total is
           something to accept or argue with, and a run he remembers is

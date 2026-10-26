@@ -98,6 +98,7 @@ interface DriverProfile {
   name: string
   phone: string
   engagement: string
+  vehicle_owner_name: string | null
   licence_no: string | null
   is_active: boolean
   has_login: boolean
@@ -402,9 +403,13 @@ export function DriverDetail({
       wide
       title={d?.name ?? 'Driver'}
       description={
+        /* Whose man he is, by name. "Comes with a rented vehicle" is true of
+           three men from three different owners and tells nobody which. */
         d
           ? `${d.phone} · ${
-              d.engagement === 'OWN_STAFF' ? 'Target Express staff' : 'comes with a rented vehicle'
+              d.vehicle_owner_name
+                ? `${d.vehicle_owner_name}'s driver`
+                : 'Target Express staff'
             }`
           : undefined
       }
