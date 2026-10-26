@@ -268,8 +268,8 @@ def seed_masters(db: Session) -> dict:
         )
         vehicles[reg] = vehicle
 
-    # One rented vehicle, so the payee rule has something to demonstrate: this
-    # trip's money settles to the owner, not to the driver at the wheel.
+    # One outside vehicle, so the payee rule has something to demonstrate:
+    # this trip's money settles to the owner, not to the driver at the wheel.
     owner, _ = _get_or_create(
         db,
         VehicleOwner,
@@ -336,6 +336,12 @@ def seed_drivers(db: Session, users: dict[str, User], vehicles: dict[str, Vehicl
                     if on_rental
                     else DriverEngagement.OWN_STAFF
                 ),
+                # WHOSE MAN HE IS, and not merely that he is somebody's.
+                # Basheer drives Ibrahim's lorry, so he is Ibrahim's; the
+                # other three are ours. Without this every driver looked
+                # identical in the lists and "who are Ibrahim's drivers" had
+                # no answer at all.
+                "vehicle_owner_id": vehicle.owner_id if on_rental else None,
                 "default_vehicle_id": vehicle.id,
             },
             phone=phone,
@@ -345,9 +351,11 @@ def seed_drivers(db: Session, users: dict[str, User], vehicles: dict[str, Vehicl
             # cash. The point incentive the vendor is charged is NOT passed on -
             # that difference is retained margin.
             #
-            # A driver on a rented lorry earns nothing for driving - his owner
-            # pays him - but the unloading cash still comes through him, because
-            # he is the one paying the labourers.
+            # A driver on a rented lorry earns nothing HERE at all. The lorry
+            # is paid for as a lorry: one amount to its owner covering the run
+            # and the unloading both, and what the owner then pays the man at
+            # the wheel is their arrangement. So these terms sit unused on him,
+            # and his earnings screen is switched off.
             db.add(
                 DriverPayTerms(
                     driver_id=driver.id,
@@ -416,8 +424,9 @@ def seed_freights(db: Session, masters: dict, drivers: list[Driver], consignees:
         ("Y26005892", "793", "KL41U0317", 1, 189375, 190275, 7, 2, FreightStatus.COMPLETED),
         # Reopens ten kilometres BELOW the previous close: always a data error.
         ("Y26005970", "797", "KL07DE1129", 2, 133422, 133900, 10, 1, FreightStatus.COMPLETED),
-        # Rented vehicle: the hire settles to Ibrahim Haji, the unloading cash
-        # goes to Basheer who pays the labourers.
+        # Rented vehicle: the whole run - the hire and the unloading both -
+        # settles to Ibrahim Haji as one amount. Basheer drives it and is paid
+        # by Ibrahim, which is not Target Express's business.
         ("Y26005988", "901", "KL10AL4477", 3, 88400, 88961, 6, 1, FreightStatus.COMPLETED),
         ("Y26006013", "798", "KL07CW3317", 0, 239373, 239761, 3, 0, FreightStatus.IN_TRANSIT),
     ]

@@ -45,6 +45,15 @@ pytestmark = pytest.mark.tables(
     "settlements",
     "freight_payouts",
     "advances",
+    # And what the seed builds, for the one test that runs it.
+    "goods_categories",
+    "vendors",
+    "vendor_divisions",
+    "vendor_warehouses",
+    "labour",
+    "rate_cards",
+    "unloading_item_rates",
+    "route_presets",
 )
 
 
@@ -322,3 +331,41 @@ def test_an_owner_sees_his_own_drivers(client, fleet, auth):
     assert [d["name"] for d in home["drivers"]] == ["Basheer C"]
     # And his lorries, both of them.
     assert len(home["vehicles"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# What a fresh database starts out saying
+# ---------------------------------------------------------------------------
+
+
+def test_the_seed_says_whose_each_driver_is(client):
+    """A column nothing fills is a column that does not exist.
+
+    The seed built four drivers and told none of them whose he was, so a
+    re-seeded database came up with Basheer looking exactly like a Target
+    Express man — which is the state the office would then have to correct
+    by hand on every fresh install.
+    """
+    from app import seed
+    from app.db.session import SessionLocal
+    from app.models.enums import VehicleOwnership
+
+    db = SessionLocal()
+    try:
+        users = seed.seed_users(db)
+        masters = seed.seed_masters(db)
+        drivers = seed.seed_drivers(db, users, masters["vehicles"])
+        db.commit()
+
+        by_name = {d.name: d for d in drivers}
+
+        # Basheer drives Ibrahim's lorry, so he is Ibrahim's man.
+        rented = masters["vehicles"]["KL10AL4477"]
+        assert rented.ownership == VehicleOwnership.HIRED
+        assert by_name["Basheer C"].vehicle_owner_id == rented.owner_id
+
+        # And the other three are ours, which is what null means.
+        for name in ("Rajesh K", "Suresh M", "Anil P"):
+            assert by_name[name].vehicle_owner_id is None, name
+    finally:
+        db.close()
