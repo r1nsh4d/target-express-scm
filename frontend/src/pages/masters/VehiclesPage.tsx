@@ -15,6 +15,7 @@ import {
   Select,
   Spinner,
 } from '@/components/ui'
+import { byName, choicesFrom, useFilters } from '@/components/Filters'
 import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
 import { VehicleDetail } from '@/components/Profiles'
 import { RowActions } from '@/components/RowActions'
@@ -40,9 +41,47 @@ export default function VehiclesPage() {
   const types = useList<VehicleType>('/vehicle-types')
   const owners = useList<VehicleOwner>('/vehicle-owners')
 
-  const shown = (vehicles.data ?? []).filter((v) =>
+  const byType = (vehicles.data ?? []).filter((v) =>
     !type ? true : type === 'none' ? !v.vehicle_type_id : v.vehicle_type_id === type,
   )
+
+  /* The chips above stay, because they carry the counts and a dropdown
+     cannot. This narrows what they leave. */
+  const view = useFilters<Vehicle>({
+    rows: byType,
+    placeholder: 'Search by number or owner',
+    search: (v) => [v.registration_no, v.owner_name, v.vehicle_type_name],
+    filters: [
+      {
+        key: 'ownership',
+        label: 'Ownership',
+        choices: [
+          { value: 'OWNED', label: 'owned' },
+          { value: 'HIRED', label: 'rented' },
+        ],
+        matches: (v, value) => v.ownership === value,
+      },
+      {
+        key: 'owner',
+        label: 'Paid to',
+        choices: choicesFrom(byType, (v) => v.owner_name),
+        matches: (v, value) => v.owner_name === value,
+      },
+    ],
+    sorts: [
+      {
+        key: 'reg',
+        label: 'By number',
+        compare: byName<Vehicle>((v) => v.registration_no),
+      },
+      {
+        // The one that answers "which lorry is doing the work".
+        key: 'km',
+        label: 'Most run',
+        compare: (a, b) => (b.last_closing_km ?? 0) - (a.last_closing_km ?? 0),
+      },
+    ],
+  })
 
   // Only the types that something is actually on. A chip for a type with no
   // lorries behind it is a dead end.
@@ -96,6 +135,8 @@ export default function VehiclesPage() {
         </div>
       ) : null}
 
+      {view.controls}
+
       {vehicles.isLoading ? (
         <Card>
           <div className="flex justify-center py-16">
@@ -104,21 +145,27 @@ export default function VehiclesPage() {
         </Card>
       ) : (
         <TileGrid
-          rows={shown}
+          rows={view.rows}
           rowKey={(v) => v.id}
           onRowClick={(v) => setViewing(v.id)}
           empty={
             <EmptyState
               icon={<Truck className="size-7" />}
-              title={type ? 'None of this type' : 'No vehicles yet'}
+              title={type || view.narrowed ? 'Nothing matches' : 'No vehicles yet'}
               description={
-                type
-                  ? 'Every lorry of this type has been retired, or there were never any.'
+                type || view.narrowed
+                  ? 'Try a different search, or clear what is narrowing the list.'
                   : 'A freight needs a vehicle before it can be dispatched.'
               }
               action={
-                type ? (
-                  <Button variant="secondary" onClick={() => setType('')}>
+                type || view.narrowed ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setType('')
+                      view.clear()
+                    }}
+                  >
                     Show all
                   </Button>
                 ) : (

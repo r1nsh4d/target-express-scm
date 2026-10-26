@@ -20,6 +20,7 @@ import {
   Table,
   Textarea,
 } from '@/components/ui'
+import { byDate, choicesFrom, useFilters } from '@/components/Filters'
 import { api, apiErrorMessage } from '@/lib/api'
 import type { Consignee, VendorDivision, Warehouse } from '@/lib/resources'
 import { STATUS_TONE, useCreate, useList } from '@/lib/resources'
@@ -63,6 +64,45 @@ export default function ConsignmentsPage() {
   const consignments = useList<Consignment>('/consignments', {
     ...(division ? { vendor_division_id: division } : {}),
     ...(unassignedOnly ? { unassigned: true } : {}),
+  })
+
+  const all = consignments.data ?? []
+  const view = useFilters<Consignment>({
+    rows: all,
+    placeholder: 'Bill number or customer',
+    search: (c) => [c.vendor_bill_no, c.consignee_name],
+    filters: [
+      {
+        key: 'customer',
+        label: 'Customer',
+        choices: choicesFrom(all, (c) => c.consignee_name),
+        matches: (c, v) => c.consignee_name === v,
+      },
+      {
+        key: 'status',
+        label: 'Status',
+        choices: choicesFrom(all, (c) => c.status, (v) => v.replace('_', ' ').toLowerCase()),
+        matches: (c, v) => c.status === v,
+      },
+    ],
+    sorts: [
+      {
+        key: 'newest',
+        label: 'Newest first',
+        compare: byDate<Consignment>((c) => c.bill_date).newest,
+      },
+      {
+        key: 'bill',
+        label: 'By bill number',
+        compare: (a, b) => a.vendor_bill_no.localeCompare(b.vendor_bill_no),
+      },
+      {
+        // The ones with the most on them, for a morning's sorting.
+        key: 'boxes',
+        label: 'Most boxes',
+        compare: (a, b) => b.declared_box_count - a.declared_box_count,
+      },
+    ],
   })
 
   return (
@@ -116,6 +156,8 @@ export default function ConsignmentsPage() {
         </Button>
       </div>
 
+      {view.controls}
+
       <Card className="overflow-hidden">
         {consignments.isLoading ? (
           <div className="flex justify-center py-16">
@@ -123,7 +165,7 @@ export default function ConsignmentsPage() {
           </div>
         ) : (
           <Table
-            rows={consignments.data ?? []}
+            rows={view.rows}
             rowKey={(c) => c.id}
             onRowClick={(c) => setShowing(c)}
             empty={

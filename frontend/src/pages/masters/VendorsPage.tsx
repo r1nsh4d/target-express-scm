@@ -15,6 +15,7 @@ import {
   Select,
   Spinner,
 } from '@/components/ui'
+import { byName, useFilters } from '@/components/Filters'
 import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
 import { RowActions } from '@/components/RowActions'
 import { apiErrorMessage } from '@/lib/api'
@@ -41,6 +42,27 @@ export default function VendorsPage() {
 
   const rateCards = useList<RateCard>('/rate-cards')
 
+  const all = vendors.data ?? []
+  const view = useFilters<Vendor>({
+    rows: all,
+    placeholder: 'Search vendors',
+    search: (v) => [v.name, v.gstin, v.contact_person, v.contact_phone],
+    filters: [
+      {
+        // A vendor with no GSTIN cannot be invoiced, which is worth being
+        // able to see on its own rather than reading down a column.
+        key: 'gstin',
+        label: 'GSTIN',
+        choices: [
+          { value: 'missing', label: 'not on file' },
+          { value: 'present', label: 'on file' },
+        ],
+        matches: (v, value) => (value === 'present' ? !!v.gstin : !v.gstin),
+      },
+    ],
+    sorts: [{ key: 'name', label: 'A to Z', compare: byName<Vendor>((v) => v.name) }],
+  })
+
   const vendorDivisions = divisions.data?.filter((d) => d.vendor_id === selected?.id) ?? []
   const vendorWarehouses = warehouses.data?.filter((w) => w.vendor_id === selected?.id) ?? []
 
@@ -59,6 +81,8 @@ export default function VendorsPage() {
         }
       />
 
+      {view.controls}
+
       {vendors.isLoading ? (
         <Card>
           <div className="flex justify-center py-16">
@@ -67,7 +91,7 @@ export default function VendorsPage() {
         </Card>
       ) : (
         <TileGrid
-          rows={vendors.data ?? []}
+          rows={view.rows}
           rowKey={(v) => v.id}
           onRowClick={(v) => setSelected(selected?.id === v.id ? null : v)}
           selected={(v) => v.id === selected?.id}

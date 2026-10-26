@@ -15,6 +15,7 @@ import {
   Select,
   Spinner,
 } from '@/components/ui'
+import { byName, choicesFrom, useFilters } from '@/components/Filters'
 import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
 import { DriverDetail } from '@/components/Profiles'
 import { RowActions } from '@/components/RowActions'
@@ -32,6 +33,42 @@ export default function DriversPage() {
   const drivers = useList<Driver>('/drivers')
   const vehicles = useList<Vehicle>('/vehicles')
 
+  const all = drivers.data ?? []
+  const view = useFilters<Driver>({
+    rows: all,
+    placeholder: 'Search by name or phone',
+    search: (d) => [d.name, d.phone, d.licence_no],
+    filters: [
+      {
+        key: 'engagement',
+        label: 'Paid by',
+        choices: choicesFrom(all, (d) => d.engagement, (v) =>
+          v === 'OWN_STAFF' ? 'Target Express' : "the vehicle's owner",
+        ),
+        matches: (d, v) => d.engagement === v,
+      },
+      {
+        // The gap that stops a man working: no login, no phone, no trip.
+        key: 'login',
+        label: 'Login',
+        choices: [
+          { value: 'yes', label: 'has one' },
+          { value: 'no', label: 'none yet' },
+        ],
+        matches: (d, v) => (v === 'yes' ? !!d.user_id : !d.user_id),
+      },
+    ],
+    sorts: [
+      { key: 'name', label: 'A to Z', compare: byName<Driver>((d) => d.name) },
+      {
+        key: 'engagement',
+        label: 'By who pays',
+        compare: (a, b) =>
+          a.engagement.localeCompare(b.engagement) || a.name.localeCompare(b.name),
+      },
+    ],
+  })
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -43,6 +80,8 @@ export default function DriversPage() {
         }
       />
 
+      {view.controls}
+
       {drivers.isLoading ? (
         <Card>
           <div className="flex justify-center py-16">
@@ -51,15 +90,27 @@ export default function DriversPage() {
         </Card>
       ) : (
         <TileGrid
-          rows={drivers.data ?? []}
+          rows={view.rows}
           rowKey={(d) => d.id}
           onRowClick={(d) => setViewing(d.id)}
           empty={
             <EmptyState
               icon={<UserRound className="size-7" />}
-              title="No drivers yet"
-              description="A driver needs a login before he can run a trip from his phone."
-              action={<Button onClick={() => setOpen(true)}>New driver</Button>}
+              title={view.narrowed ? 'Nobody matches' : 'No drivers yet'}
+              description={
+                view.narrowed
+                  ? 'Try a different name, or clear the filters.'
+                  : 'A driver needs a login before he can run a trip from his phone.'
+              }
+              action={
+                view.narrowed ? (
+                  <Button variant="secondary" onClick={view.clear}>
+                    Clear
+                  </Button>
+                ) : (
+                  <Button onClick={() => setOpen(true)}>New driver</Button>
+                )
+              }
             />
           }
           render={(d) => (

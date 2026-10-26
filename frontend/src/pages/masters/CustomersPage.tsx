@@ -16,6 +16,7 @@ import {
   Spinner,
   Textarea,
 } from '@/components/ui'
+import { byName, choicesFrom, useFilters } from '@/components/Filters'
 import { Fact, Facts, TileGrid, TileHead } from '@/components/TileGrid'
 import { RowActions } from '@/components/RowActions'
 import { api, apiErrorMessage } from '@/lib/api'
@@ -33,8 +34,57 @@ export default function CustomersPage() {
 
   // The command palette's "New …" lands here with ?new=1.
   useOpenOnNewParam(useCallback(() => setOpen(true), []))
+  /* The search stays on the SERVER — a customer list runs to thousands and
+     the browser only ever holds the first hundred. What the shared control
+     adds is the narrowing and ordering of whatever came back. */
   const [search, setSearch] = useState('')
   const consignees = useList<Consignee>('/consignees', search ? { q: search } : undefined)
+
+  const all = consignees.data ?? []
+  const view = useFilters<Consignee>({
+    rows: all,
+    placeholder: 'Filter these by name or town',
+    search: (c) => [c.name, c.city, c.phone, c.contact_person],
+    filters: [
+      {
+        key: 'type',
+        label: 'Kind',
+        choices: [
+          { value: 'RETAIL_CUSTOMER', label: 'customer' },
+          { value: 'DISTRIBUTION_CENTER', label: 'distribution centre' },
+        ],
+        matches: (c, v) => c.type === v,
+      },
+      {
+        key: 'city',
+        label: 'Town',
+        choices: choicesFrom(all, (c) => c.city),
+        matches: (c, v) => c.city === v,
+      },
+      {
+        // The records that make a delivery go wrong, in one click.
+        key: 'ready',
+        label: 'Record',
+        choices: [
+          { value: 'incomplete', label: 'needs an address or a pin' },
+          { value: 'complete', label: 'ready to deliver to' },
+        ],
+        matches: (c, v) => {
+          const ready = !!c.address && c.geo_confidence !== 'UNVERIFIED'
+          return v === 'complete' ? ready : !ready
+        },
+      },
+    ],
+    sorts: [
+      { key: 'name', label: 'A to Z', compare: byName<Consignee>((c) => c.name) },
+      {
+        key: 'town',
+        label: 'By town',
+        compare: (a, b) =>
+          (a.city ?? '').localeCompare(b.city ?? '') || a.name.localeCompare(b.name),
+      },
+    ],
+  })
 
   return (
     <div className="space-y-6">
@@ -60,6 +110,8 @@ export default function CustomersPage() {
         />
       </div>
 
+      {view.controls}
+
       {consignees.isLoading ? (
         <Card>
           <div className="flex justify-center py-16">
@@ -68,19 +120,21 @@ export default function CustomersPage() {
         </Card>
       ) : (
         <TileGrid
-          rows={consignees.data ?? []}
+          rows={view.rows}
           rowKey={(c) => c.id}
           empty={
             <EmptyState
               icon={<Users className="size-7" />}
-              title={search ? 'No matches' : 'No customers yet'}
+              title={search || view.narrowed ? 'No matches' : 'No customers yet'}
               description={
-                search
+                search || view.narrowed
                   ? 'Try a different name, city or phone number.'
                   : 'Add the delivery points before building a trip.'
               }
               action={
-                search ? undefined : <Button onClick={() => setOpen(true)}>New customer</Button>
+                search || view.narrowed ? undefined : (
+                  <Button onClick={() => setOpen(true)}>New customer</Button>
+                )
               }
             />
           }

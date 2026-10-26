@@ -27,6 +27,7 @@ import type {
   Warehouse,
 } from '@/lib/resources'
 import { STATUS_TONE, useCreate, useList } from '@/lib/resources'
+import { byDate, choicesFrom, useFilters } from '@/components/Filters'
 import { useOpenOnNewParam } from '@/lib/motion'
 
 export default function TripsPage() {
@@ -37,7 +38,51 @@ export default function TripsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const navigate = useNavigate()
 
+  // Status stays on the server, because the list is paged there and a
+  // status filtered in the browser would narrow one page rather than the
+  // run of work.
   const trips = useList<FreightRow>('/freights', statusFilter ? { status: statusFilter } : undefined)
+
+  const all = trips.data ?? []
+  const view = useFilters<FreightRow>({
+    rows: all,
+    placeholder: 'Trip number, LR, vehicle, driver or town',
+    search: (t) => [t.trip_no, t.lr_no, t.vehicle_no, t.driver_name, t.destination_text],
+    filters: [
+      {
+        key: 'vehicle',
+        label: 'Vehicle',
+        choices: choicesFrom(all, (t) => t.vehicle_no),
+        matches: (t, v) => t.vehicle_no === v,
+      },
+      {
+        key: 'driver',
+        label: 'Driver',
+        choices: choicesFrom(all, (t) => t.driver_name),
+        matches: (t, v) => t.driver_name === v,
+      },
+      {
+        // "Which of these still has nobody on it" is the question somebody
+        // asks every morning, and it was a read down two columns.
+        key: 'assigned',
+        label: 'Assigned',
+        choices: [
+          { value: 'no', label: 'no vehicle yet' },
+          { value: 'yes', label: 'has a vehicle' },
+        ],
+        matches: (t, v) => (v === 'yes' ? !!t.vehicle_no : !t.vehicle_no),
+      },
+    ],
+    sorts: [
+      { key: 'newest', label: 'Newest first', compare: byDate<FreightRow>((t) => t.trip_date).newest },
+      { key: 'oldest', label: 'Oldest first', compare: byDate<FreightRow>((t) => t.trip_date).oldest },
+      {
+        key: 'km',
+        label: 'Longest run',
+        compare: (a, b) => (b.total_km ?? 0) - (a.total_km ?? 0),
+      },
+    ],
+  })
 
   return (
     <div className="space-y-6">
@@ -73,6 +118,8 @@ export default function TripsPage() {
         </Field>
       </div>
 
+      {view.controls}
+
       <Card className="overflow-hidden">
         {trips.isLoading ? (
           <div className="flex justify-center py-16">
@@ -80,7 +127,7 @@ export default function TripsPage() {
           </div>
         ) : (
           <Table
-            rows={trips.data ?? []}
+            rows={view.rows}
             rowKey={(t) => t.id}
             onRowClick={(t) => navigate(`/freights/${t.id}`)}
             empty={
@@ -94,16 +141,24 @@ export default function TripsPage() {
                 title={
                   statusFilter
                     ? `No ${statusFilter.replace('_', ' ').toLowerCase()} trips`
-                    : 'No trips yet'
+                    : view.narrowed
+                      ? 'Nothing matches'
+                      : 'No trips yet'
                 }
                 description={
-                  statusFilter
-                    ? 'There are none at this status. Clear the filter to see the rest.'
+                  statusFilter || view.narrowed
+                    ? 'Nothing here matches what you are narrowing by. Clear it to see the rest.'
                     : 'Build one from a vendor division, a warehouse and the points it will serve.'
                 }
                 action={
-                  statusFilter ? (
-                    <Button variant="secondary" onClick={() => setStatusFilter('')}>
+                  statusFilter || view.narrowed ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setStatusFilter('')
+                        view.clear()
+                      }}
+                    >
                       Show all trips
                     </Button>
                   ) : (
