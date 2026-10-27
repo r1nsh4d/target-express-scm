@@ -113,6 +113,14 @@ export default function RateCardsPage() {
         </Field>
       </div>
 
+      {/* Priced per vehicle, with nothing to fall back on.
+          The base charge depends on the lorry, so a division often carries a
+          card per type. But the type comes off the vehicle record, and a
+          lorry whose type was never set matches no card at all — the freight
+          then cannot be priced and cannot be invoiced, which is found out at
+          the end of the month rather than here. */}
+      <Uncovered cards={cards.data ?? []} divisionName={divisionName} />
+
       {cards.isLoading ? (
         <div className="flex justify-center py-16">
           <Spinner className="size-5" />
@@ -152,6 +160,62 @@ export default function RateCardsPage() {
         divisions={divisions.data ?? []}
         types={types.data ?? []}
       />
+    </div>
+  )
+}
+
+/** Divisions priced per vehicle type with no catch-all card behind them.
+ *
+ *  `select_effective_card` prefers the card naming the trip's vehicle type
+ *  and falls back to the one naming none. With no fallback, a lorry whose
+ *  type was never set matches nothing, and the freight cannot be priced.
+ *  That is a configuration gap, not a bug, and it is invisible until an
+ *  invoice is attempted — so it is said here, where it can be fixed. */
+function Uncovered({
+  cards,
+  divisionName,
+}: {
+  cards: RateCard[]
+  divisionName: (id: string) => string
+}) {
+  const gaps: string[] = []
+  const seen = new Set<string>()
+
+  for (const card of cards) {
+    const id = card.vendor_division_id
+    if (seen.has(id)) continue
+    seen.add(id)
+
+    const mine = cards.filter((c) => c.vendor_division_id === id)
+    if (mine.some((c) => c.vehicle_type_id) && !mine.some((c) => !c.vehicle_type_id)) {
+      gaps.push(divisionName(id))
+    }
+  }
+
+  if (!gaps.length) return null
+
+  return (
+    <div
+      className="rounded-[12px] border px-4 py-3 text-[12.5px] leading-relaxed"
+      style={{
+        borderColor: 'color-mix(in oklab, var(--warning) 45%, transparent)',
+        background: 'color-mix(in oklab, var(--warning) 7%, transparent)',
+      }}
+    >
+      <p className="font-medium">
+        {gaps.length === 1 ? `${gaps[0]} is` : `${gaps.join(', ')} are`} priced per vehicle
+        type, with nothing behind {gaps.length === 1 ? 'it' : 'them'}.
+      </p>
+      <p className="mt-1" style={{ color: 'var(--text-muted)' }}>
+        A trip is priced on the card naming its lorry's type, and falls back to the card
+        naming none. There is no such card here, so a lorry whose type was never set
+        cannot be priced at all — and that is found out when the invoice is attempted.
+        Either add a card for <span className="font-medium">Any vehicle</span>, or{' '}
+        <Link to="/vehicles" className="no-underline" style={{ color: 'var(--accent)' }}>
+          set the type on every lorry
+        </Link>
+        .
+      </p>
     </div>
   )
 }

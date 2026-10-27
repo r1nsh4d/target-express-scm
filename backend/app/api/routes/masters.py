@@ -657,6 +657,23 @@ class RateCardIn(BaseModel):
 class RateCardOut(RateCardIn, ORMModel):
     id: str
     is_active: bool
+    # WHICH LORRY THIS PRICE IS FOR. A Dost and a 403 are different money for
+    # the same run, so two cards on one division are the normal arrangement
+    # rather than a duplicate — and a screen showing only the figures makes
+    # them look like one. NULL is the catch-all, which prices anything with
+    # no card of its own.
+    vehicle_type_name: str | None = None
+
+
+def _rate_card_out(types: dict[str, str], card: RateCard) -> RateCardOut:
+    out = RateCardOut.model_validate(card)
+    if card.vehicle_type_id is not None:
+        out.vehicle_type_name = types.get(str(card.vehicle_type_id))
+    return out
+
+
+def _type_names(db: Session) -> dict[str, str]:
+    return {str(t.id): t.name for t in db.execute(select(VehicleType)).scalars().all()}
 
 
 @router.get("/rate-cards", response_model=list[RateCardOut])
@@ -674,7 +691,9 @@ def list_rate_cards(
         stmt = stmt.where(RateCard.is_active.is_(True))
     if vendor_division_id:
         stmt = stmt.where(RateCard.vendor_division_id == vendor_division_id)
-    return [RateCardOut.model_validate(r) for r in db.execute(stmt).scalars().all()]
+
+    types = _type_names(db)
+    return [_rate_card_out(types, r) for r in db.execute(stmt).scalars().all()]
 
 
 @router.post("/rate-cards", response_model=RateCardOut, status_code=201)
@@ -686,7 +705,11 @@ def create_rate_card(payload: RateCardIn, db: Session = Depends(get_db), _=Write
     unchanged.
     """
     _get_or_404(db, VendorDivision, payload.vendor_division_id, "Vendor division")
-    return RateCardOut.model_validate(_save(db, RateCard(**payload.model_dump())))
+    # Named, not just accepted. A card pointing at a vehicle type that is not
+    # there prices nothing and says nothing about why.
+    if payload.vehicle_type_id is not None:
+        _get_or_404(db, VehicleType, payload.vehicle_type_id, "Vehicle type")
+    return _rate_card_out(_type_names(db), _save(db, RateCard(**payload.model_dump())))
 
 
 class UnloadingItemRateIn(BaseModel):

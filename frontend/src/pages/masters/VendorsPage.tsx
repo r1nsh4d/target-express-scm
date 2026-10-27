@@ -1,4 +1,4 @@
-import { Building2, Plus, ReceiptIndianRupee, Warehouse } from 'lucide-react'
+import { Building2, Plus, ReceiptIndianRupee, Truck, Warehouse } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -67,8 +67,22 @@ export default function VendorsPage() {
   const vendorWarehouses = warehouses.data?.filter((w) => w.vendor_id === selected?.id) ?? []
 
   const divisionIds = new Set(vendorDivisions.map((d) => d.id))
-  const vendorRateCards =
+
+  /* A division's cards together, catch-all first, then one per vehicle type.
+     The list arrives newest-dated first, which scatters a division's Dost
+     card away from its 403 card and makes a set of prices read as a pile. */
+  const divisionName = (id: string) =>
+    vendorDivisions.find((d) => d.id === id)?.name ?? ''
+  const vendorRateCards = (
     rateCards.data?.filter((c) => divisionIds.has(c.vendor_division_id)) ?? []
+  )
+    .slice()
+    .sort(
+      (a, b) =>
+        divisionName(a.vendor_division_id).localeCompare(divisionName(b.vendor_division_id)) ||
+        (a.vehicle_type_name ?? '').localeCompare(b.vehicle_type_name ?? '') ||
+        b.effective_from.localeCompare(a.effective_from),
+    )
 
   return (
     <div className="space-y-6">
@@ -237,7 +251,7 @@ export default function VendorsPage() {
               <div>
                 <h2 className="text-sm font-semibold">Rate cards</h2>
                 <p className="mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                  What {selected.name} is charged, per division and per date
+                  What {selected.name} is charged — per division, per vehicle and per date
                 </p>
               </div>
               <Link to="/rate-cards">
@@ -257,7 +271,20 @@ export default function VendorsPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-[13.5px] font-medium">
-                          {vendorDivisions.find((d) => d.id === c.vendor_division_id)?.name ?? '—'}
+                          {divisionName(c.vendor_division_id) || '—'}
+                        </p>
+                        {/* WHICH LORRY THIS PRICE IS FOR.
+                            The base charge depends on the vehicle — a Dost
+                            and a 403 are different money for the same run —
+                            so two cards on one division is the normal
+                            arrangement. Without this line they read as
+                            duplicates of each other. */}
+                        <p
+                          className="mt-0.5 flex items-center gap-1.5 text-[12px]"
+                          style={{ color: c.vehicle_type_name ? 'var(--text)' : 'var(--text-muted)' }}
+                        >
+                          <Truck className="size-3 shrink-0" />
+                          {c.vehicle_type_name ?? 'Any vehicle'}
                         </p>
                         <p className="tnum mt-0.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
                           {c.effective_from} → {c.effective_to ?? 'open'}

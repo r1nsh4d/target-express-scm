@@ -174,7 +174,13 @@ export interface Consignee {
 export interface RateCard {
   id: string
   vendor_division_id: string
+  /* WHICH LORRY THIS PRICE IS FOR. A Dost and a 403 are different money for
+     the same run, so two cards on one division are the normal arrangement
+     rather than a duplicate. Null is the catch-all: it prices anything that
+     has no card of its own, and a division without one cannot price a lorry
+     whose type was never set. */
   vehicle_type_id: string | null
+  vehicle_type_name: string | null
   effective_from: string
   effective_to: string | null
   base_trip_amount: string | number

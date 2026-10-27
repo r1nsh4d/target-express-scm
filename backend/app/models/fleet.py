@@ -16,12 +16,17 @@ from app.models.enums import (
 
 
 class VehicleType(BaseModel):
-    """DOST, 509F and so on.
+    """Dost, 403, Ace, 509F and so on.
 
-    Printed on the vendor invoice header but, on the Godrej contracts, it does
-    not change the rate: the same registrations bill identically across both
-    divisions. Kept as an optional qualifier on the rate card in case a future
-    vendor does price by type.
+    THE BASE TRIP CHARGE DEPENDS ON IT. A Dost and a 403 are different money
+    for the same run, so a vendor division carries a card per type and the
+    type is read off the lorry actually assigned to the trip.
+
+    The Godrej cards seeded here happen to name no type, which makes them the
+    catch-all: `select_effective_card` prefers the card naming the trip's
+    type and falls back to the one naming none. That fallback is also what
+    prices a lorry whose type was never set — a division with no catch-all
+    cannot price one at all.
     """
 
     __tablename__ = "vehicle_types"
